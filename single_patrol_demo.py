@@ -15,7 +15,7 @@ from simulation import edge_travel_time_hours, precompute_sector_assignment
 
 
 DEFAULT_GRAPH_PATH = "etosha_grid_graph.json"
-DEFAULT_PRIORITY_PATH = "etosha_node_priority_compact.json"
+DEFAULT_PRIORITY_PATH = "solution/etosha_node_priority_compact_clamped.json"
 DEFAULT_OUT_JSON = "single_patrol_demo_output.json"
 DEFAULT_OUT_PNG = "single_patrol_demo_route.png"
 DEFAULT_BASE_CELL_ID = "r20_c168"

@@ -56,6 +56,20 @@ def _extract_priority_map(priority_data: Dict[str, Any], score_field: str) -> Di
     return out
 
 
+def _clamp_priority_to_valid_map(
+    graph: Dict[str, Any],
+    priority_map: Dict[str, float],
+) -> Dict[str, float]:
+    nodes: Dict[str, Dict[str, Any]] = graph["node_features"]
+    out: Dict[str, float] = {}
+    for cid, nf in nodes.items():
+        if nf.get("median_elevation_m") is None:
+            out[cid] = 0.0
+        else:
+            out[cid] = float(priority_map.get(cid, 0.0))
+    return out
+
+
 def _resolve_priority_data(
     priority_path: str,
     graph: Dict[str, Any],
@@ -63,7 +77,7 @@ def _resolve_priority_data(
 ) -> Dict[str, Any]:
     candidate_paths = [
         priority_path,
-        "etosha_node_priority_compact.json",
+        "etosha_node_priority_compact_clamped.json",
         "etosha_node_priority.json",
     ]
     for path in candidate_paths:
@@ -78,10 +92,11 @@ def _resolve_priority_data(
 
     full = compute_priorities(graph)
     compact = build_compact_priority_map(full)
-    with open("etosha_node_priority_compact.json", "w", encoding="utf-8") as f:
-        json.dump(compact, f, ensure_ascii=False)
-    print("Saved computed priorities to: etosha_node_priority_compact.json")
-    return compact
+    clamped = _clamp_priority_to_valid_map(graph=graph, priority_map=compact)
+    with open("etosha_node_priority_compact_clamped.json", "w", encoding="utf-8") as f:
+        json.dump(clamped, f, ensure_ascii=False)
+    print("Saved computed priorities to: etosha_node_priority_compact_clamped.json")
+    return clamped
 
 
 def _extract_border_cells(
@@ -177,7 +192,7 @@ def main() -> None:
     parser.add_argument("--graph", default="etosha_grid_graph.json", help="Path to graph JSON")
     parser.add_argument(
         "--priority",
-        default="etosha_node_priority_compact.json",
+        default="etosha_node_priority_compact_clamped.json",
         help="Path to node priority JSON (compact or verbose)",
     )
     parser.add_argument(

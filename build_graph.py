@@ -24,6 +24,7 @@ EXTRA_POI_LAYERS = [
 ]
 
 CELL_SIZE_M = 1000.0
+DIAGONAL_DISTANCE_M = CELL_SIZE_M * (2.0 ** 0.5)
 OUT_JSON = "etosha_grid_graph.json"
 FIRE_NO_FIRE_DILATE_STEPS = 2
 FIRE_NO_FIRE_SMOOTH_ITERS = 6
@@ -729,7 +730,18 @@ def build_graph():
     for cid, feats in node_features.items():
         rr = feats["row"]
         cc = feats["col"]
-        for nr, nc in ((rr - 1, cc), (rr + 1, cc), (rr, cc - 1), (rr, cc + 1)):
+        for dr, dc in (
+            (-1, 0),
+            (1, 0),
+            (0, -1),
+            (0, 1),
+            (-1, -1),
+            (-1, 1),
+            (1, -1),
+            (1, 1),
+        ):
+            nr = rr + dr
+            nc = cc + dc
             neighbor_id = active_lookup.get((nr, nc))
             if neighbor_id is None:
                 continue
@@ -737,27 +749,41 @@ def build_graph():
             z1 = feats["median_elevation_m"]
             z2 = node_features[neighbor_id]["median_elevation_m"]
             zdiff = None if z1 is None or z2 is None else abs(float(z1) - float(z2))
-            edge_key = ((rr, cc), (nr, nc)) if (rr, cc) < (nr, nc) else ((nr, nc), (rr, cc))
-            if edge_key not in edge_road_cache:
-                edge_road_cache[edge_key] = road_between_cells_stats(
-                    roads_sindex=roads_sindex,
-                    road_geometries=road_geometries,
-                    min_x=min_x,
-                    min_y=min_y,
-                    cell_size_m=CELL_SIZE_M,
-                    n_cols=n_cols,
-                    road_len_by_cell=road_len,
-                    r1=rr,
-                    c1=cc,
-                    r2=nr,
-                    c2=nc,
-                )
+            is_diagonal = dr != 0 and dc != 0
+
+            if is_diagonal:
+                edge_road_stats = {
+                    "road_between_cells": False,
+                    "roads_between_cells_count": 0,
+                    "roads_between_cells_length_m": 0.0,
+                }
+                distance_m = DIAGONAL_DISTANCE_M
+                shared_border_m = 0.0
+            else:
+                edge_key = ((rr, cc), (nr, nc)) if (rr, cc) < (nr, nc) else ((nr, nc), (rr, cc))
+                if edge_key not in edge_road_cache:
+                    edge_road_cache[edge_key] = road_between_cells_stats(
+                        roads_sindex=roads_sindex,
+                        road_geometries=road_geometries,
+                        min_x=min_x,
+                        min_y=min_y,
+                        cell_size_m=CELL_SIZE_M,
+                        n_cols=n_cols,
+                        road_len_by_cell=road_len,
+                        r1=rr,
+                        c1=cc,
+                        r2=nr,
+                        c2=nc,
+                    )
+                edge_road_stats = edge_road_cache[edge_key]
+                distance_m = CELL_SIZE_M
+                shared_border_m = CELL_SIZE_M
 
             edge_features[cid][neighbor_id] = {
-                "distance_m": CELL_SIZE_M,
-                "shared_border_m": CELL_SIZE_M,
+                "distance_m": distance_m,
+                "shared_border_m": shared_border_m,
                 "elevation_median_diff_m": zdiff,
-                **edge_road_cache[edge_key],
+                **edge_road_stats,
             }
 
     return node_features, edge_features, {

@@ -25,7 +25,7 @@ ANIMAL_WEIGHTS: Dict[str, float] = {
 
 
 DEFAULT_GRAPH_PATH = "etosha_grid_graph.json"
-DEFAULT_PRIORITY_PATH = "etosha_node_priority_compact.json"
+DEFAULT_PRIORITY_PATH = "etosha_node_priority_compact_clamped.json"
 DEFAULT_OUT_PNG = "etosha_node_priorities_map.png"
 DEFAULT_OUT_JSON = "etosha_node_priority_compact_clamped.json"
 

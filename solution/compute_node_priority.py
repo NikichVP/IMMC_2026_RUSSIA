@@ -192,13 +192,27 @@ def build_compact_priority_map(full_result: Dict[str, Any]) -> Dict[str, float]:
     return {node_id: float(parts["priority_P_i"]) for node_id, parts in node_priority.items()}
 
 
+def clamp_priority_to_valid_map(
+    graph: Dict[str, Any],
+    priority_map: Dict[str, float],
+) -> Dict[str, float]:
+    nodes: Dict[str, Dict[str, Any]] = graph["node_features"]
+    out: Dict[str, float] = {}
+    for node_id, feat in nodes.items():
+        if feat.get("median_elevation_m") is None:
+            out[node_id] = 0.0
+        else:
+            out[node_id] = float(priority_map.get(node_id, 0.0))
+    return out
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Compute node priorities for each graph cell")
     parser.add_argument("--graph", default="etosha_grid_graph.json", help="Path to graph JSON")
     parser.add_argument(
         "--out",
-        default="etosha_node_priority_compact.json",
-        help="Output JSON path with compact priorities (node_id -> priority)",
+        default="etosha_node_priority_compact_clamped.json",
+        help="Output JSON path with compact clamped priorities (node_id -> priority)",
     )
     parser.add_argument(
         "--top-k-neighbors",
@@ -224,7 +238,10 @@ def main() -> None:
         payload: Any = result_full
         count = len(result_full["node_priority"])
     else:
-        payload = build_compact_priority_map(result_full)
+        payload = clamp_priority_to_valid_map(
+            graph=graph,
+            priority_map=build_compact_priority_map(result_full),
+        )
         count = len(payload)
 
     with open(args.out, "w", encoding="utf-8") as f:
