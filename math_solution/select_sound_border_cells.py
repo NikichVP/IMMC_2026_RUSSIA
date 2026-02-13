@@ -128,10 +128,38 @@ def _extract_border_cells(
     if not node_priority:
         raise ValueError("No node priorities found in priority file (unsupported format)")
 
+    by_rc: Dict[tuple, str] = {}
+    inside_mask: Dict[str, bool] = {}
+    for cid, nf in nodes.items():
+        if not isinstance(nf, dict):
+            continue
+        rr = int(nf.get("row", -1))
+        cc = int(nf.get("col", -1))
+        if rr >= 0 and cc >= 0:
+            by_rc[(rr, cc)] = cid
+        inside_mask[cid] = nf.get("median_elevation_m") is not None
+
     out: List[BorderCellScore] = []
     for cell_id, node_feat in nodes.items():
-        is_border = bool(node_feat.get("is_boarder", node_feat.get("is_border", False)))
-        if not is_border:
+        if not isinstance(node_feat, dict):
+            continue
+        # True park border: inside cell with at least one outside (or missing) 4-neighbor.
+        if node_feat.get("median_elevation_m") is None:
+            continue
+        rr = int(node_feat.get("row", -1))
+        cc = int(node_feat.get("col", -1))
+        if rr < 0 or cc < 0:
+            continue
+        has_outside_neighbor = False
+        for dr, dc in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+            nb_id = by_rc.get((rr + dr, cc + dc))
+            if nb_id is None:
+                has_outside_neighbor = True
+                break
+            if not inside_mask.get(nb_id, False):
+                has_outside_neighbor = True
+                break
+        if not has_outside_neighbor:
             continue
 
         if cell_id not in node_priority:
@@ -175,6 +203,7 @@ def select_border_cells_for_sound(
     border_cells = _extract_border_cells(graph, priority_data, score_field=score_field)
     selected_count = min(requested_cell_count, len(border_cells))
     selected = border_cells[:selected_count]
+    all_selected_are_border = True
 
     covered_km = selected_count * km_per_border_cell
     unallocated_km = max(0.0, sound_km - covered_km)
@@ -182,12 +211,17 @@ def select_border_cells_for_sound(
 
     return {
         "meta": {
+            "selection_policy": (
+                "top_priority_on_derived_park_boundary_desc_then_cell_id "
+                "(derived boundary = inside cell with >=1 outside 4-neighbor)"
+            ),
             "score_field": score_field,
             "sound_km_requested": sound_km,
             "km_per_border_cell": km_per_border_cell,
             "requested_cell_count": requested_cell_count,
             "selected_cell_count": selected_count,
             "total_border_cells_available": len(border_cells),
+            "all_selected_are_border": all_selected_are_border,
             "covered_km": covered_km,
             "unallocated_km": unallocated_km,
             "selected_priority_sum": selected_priority_sum,

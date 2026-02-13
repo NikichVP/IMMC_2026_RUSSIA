@@ -10,7 +10,10 @@ from typing import Dict, Iterable, List, Optional, Tuple
 try:
     from build_big_dist_with_portals import precompute_big_square_portal_routes_weight_over_distance
 except ModuleNotFoundError:
-    from solution.build_big_dist_with_portals import precompute_big_square_portal_routes_weight_over_distance
+    try:
+        from solution.build_big_dist_with_portals import precompute_big_square_portal_routes_weight_over_distance
+    except ModuleNotFoundError:
+        precompute_big_square_portal_routes_weight_over_distance = None
 
 if "MPLCONFIGDIR" not in os.environ:
     os.environ["MPLCONFIGDIR"] = "/tmp/mpl-cache"
@@ -277,6 +280,8 @@ class _PortalReconstructor:
         small_idx: dict,
         k_portals_per_side: int = 5,
     ):
+        if precompute_big_square_portal_routes_weight_over_distance is None:
+            raise ValueError("Portal route precompute module is unavailable")
         self.smallgraph = smallgraph
         self.biggraph = biggraph
         self.smallgraph_path = smallgraph_path
@@ -888,6 +893,7 @@ def _parse_routes(spec: str, patrol_count: int) -> List[int]:
 
 def _draw(
     result: dict,
+    smallgraph: dict,
     layers: dict,
     pr_layers: dict,
     big_cells: Dict[str, dict],
@@ -899,7 +905,9 @@ def _draw(
 ) -> None:
     best = result.get("best")
     if not isinstance(best, dict):
-        raise ValueError("Invalid result JSON: missing best")
+        best = result.get("patrol_best")
+    if not isinstance(best, dict):
+        raise ValueError("Invalid result JSON: missing best/patrol_best")
     patrols = best.get("patrols")
     if not isinstance(patrols, list) or not patrols:
         raise ValueError("Invalid result JSON: missing patrols")
@@ -969,21 +977,8 @@ def _draw(
                 zorder=5,
             )
         )
-        cx, cy = info["center"]
-        s = max(0.0, S.get(bid, 0.0))
-        ax.text(
-            cx,
-            cy,
-            f"{s:.2f}",
-            fontsize=4.2,
-            color="#2e3d6b",
-            ha="center",
-            va="center",
-            alpha=0.92,
-            zorder=6,
-        )
 
-    route_colors = ["#0057ff", "#ff2d20", "#19a974", "#a66bff", "#ff8c00", "#00a7a7"]
+    route_colors = ["#0057ff", "#00b050", "#19a974", "#a66bff", "#ff8c00", "#00a7a7"]
     legend_handles: List[Line2D] = []
 
     for rank, p_idx in enumerate(use_routes):
@@ -1030,11 +1025,52 @@ def _draw(
         label = f"Route #{p_idx+1}: {route_len_m/1000.0:.1f} km, {t_h:.2f} h"
         legend_handles.append(Line2D([0], [0], color=col, lw=3, label=label))
 
+    # Draw selected sound-tracker border cells on top of map.
+    sound_selection = best.get("sound_selection")
+    if not isinstance(sound_selection, dict):
+        sound_selection = result.get("sound_selection_best")
+    sound_rows = sound_selection.get("selected_border_cells", []) if isinstance(sound_selection, dict) else []
+    node_features = smallgraph.get("node_features", {}) if isinstance(smallgraph, dict) else {}
+    sound_drawn = 0
+    for row in sound_rows:
+        cell_id = row.get("cell_id") if isinstance(row, dict) else None
+        nf = node_features.get(cell_id) if isinstance(cell_id, str) else None
+        if not isinstance(nf, dict):
+            continue
+        bbox = nf.get("bbox_m")
+        if not (isinstance(bbox, list) and len(bbox) == 4):
+            continue
+        x0, y0, x1, y1 = map(float, bbox)
+        ax.add_patch(
+            Rectangle(
+                (x0, y0),
+                x1 - x0,
+                y1 - y0,
+                facecolor="none",
+                edgecolor="#00c2ff",
+                linewidth=1.4,
+                alpha=0.96,
+                zorder=13,
+            )
+        )
+        sound_drawn += 1
+
+    if sound_drawn > 0:
+        legend_handles.append(
+            Line2D(
+                [0],
+                [0],
+                color="#00c2ff",
+                lw=2.2,
+                label=f"Sound tracker border cells: {sound_drawn}",
+            )
+        )
+
     if legend_handles:
         ax.legend(handles=legend_handles, loc="lower right", frameon=True, framealpha=0.92, fontsize=8)
 
     k_val = best.get("K")
-    ax.set_title(f"Priority map + big-square boundaries + big-square priority labels | patrol routes (K={k_val})")
+    ax.set_title(f"Priority map + big-square boundaries | patrol routes (K={k_val})")
 
     fig.tight_layout()
     fig.savefig(out_png, dpi=220, bbox_inches="tight")
@@ -1088,6 +1124,7 @@ def main() -> int:
 
     _draw(
         result=result,
+        smallgraph=smallgraph,
         layers=layers,
         pr_layers=pr_layers,
         big_cells=big_cells,
