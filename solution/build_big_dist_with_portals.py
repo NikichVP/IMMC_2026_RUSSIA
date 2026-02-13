@@ -768,6 +768,68 @@ def build_dist_big_cells_with_portals(
 
         return float(total_p)
 
+    def _small_priority_sum_for_path(path):
+        if not isinstance(path, list):
+            return 0.0
+        used = set()
+        s = 0.0
+        for cid in path:
+            if cid in used:
+                continue
+            used.add(cid)
+            s += float(small_priority_by_cell.get(cid, 0.0))
+        return float(s)
+
+    inside_best_by_block_side = {bid: {si: {} for si in sides} for bid in big_ids}
+    for bid in big_ids:
+        for side_in in sides:
+            for side_out in sides:
+                res = raw_cache.get((bid, side_in, side_out))
+                if res is None:
+                    res = precompute_big_square_portal_routes_weight_over_distance(
+                        bid,
+                        side_in,
+                        side_out,
+                        k_portals_per_side=k,
+                        small_graph_path=small_graph_path,
+                        big_graph_path=big_graph_path,
+                    )
+                    raw_cache[(bid, side_in, side_out)] = res
+
+                best_d = math.inf
+                best_p = -math.inf
+                table = res.get("table", {})
+                if isinstance(table, dict):
+                    for row in table.values():
+                        if not isinstance(row, dict):
+                            continue
+                        for rec in row.values():
+                            if not isinstance(rec, dict):
+                                continue
+                            try:
+                                d = float(rec.get("distance_m", math.inf))
+                            except Exception:
+                                d = math.inf
+                            if not math.isfinite(d):
+                                continue
+                            p = _small_priority_sum_for_path(rec.get("path"))
+                            if d < best_d - 1e-12 or (abs(d - best_d) <= 1e-12 and p > best_p + 1e-12):
+                                best_d = d
+                                best_p = p
+
+                if not math.isfinite(best_d):
+                    inside_best_by_block_side[bid][side_in][side_out] = {
+                        "distance_m": inf_json,
+                        "time_h": inf_json,
+                        "small_priority_sum": inf_json,
+                    }
+                else:
+                    inside_best_by_block_side[bid][side_in][side_out] = {
+                        "distance_m": float(best_d),
+                        "time_h": float(best_d / speed_m_per_h),
+                        "small_priority_sum": float(best_p if math.isfinite(best_p) else 0.0),
+                    }
+
     dist_out = {i: {} for i in big_ids}
     t0 = time.time()
     total_sources = len(big_ids)
@@ -825,6 +887,7 @@ def build_dist_big_cells_with_portals(
             "small_graph_path": small_graph_path,
             "big_graph_path": big_graph_path,
             "inside_cost_model": "k_by_k_portal_matrix_dp",
+            "inside_best_by_block_side_mode": "best_portal_pair_by_min_distance_tiebreak_max_small_priority_sum",
             "diagonal_big_edges_used": False,
             "small_priority_sum_mode": "unique_small_cell_ids_on_intermediate_big_blocks",
             "weight_keys": list(weight_keys),
@@ -836,6 +899,7 @@ def build_dist_big_cells_with_portals(
             "inf_replacement": inf_json,
             "out_path": out_path_resolved,
         },
+        "inside_best_by_block_side": inside_best_by_block_side,
         "dist": dist_out,
     }
 
