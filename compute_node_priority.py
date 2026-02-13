@@ -12,10 +12,10 @@ from typing import Any, Dict, Iterable, List, Tuple
 # =========================
 TOP_K_NEIGHBORS = 1000
 
-W_WATER = 0.30
-W_BORDER = 0.20
-W_PLANT = 0.10
-W_COVERAGE_PENALTY = 0.30
+W_ANIMAL = 1.00
+W_WATER = 0.50
+W_PLANT = 0.50
+W_COVERAGE_PENALTY = 0.50
 
 # Layer weights now come from a decay function and are normalized to 1.
 # raw(h) = exp(-HOP_DECAY_ALPHA * h), h in {0(self), 1, 2}
@@ -73,17 +73,15 @@ def compute_local_score(node_feat: Dict[str, Any]) -> Tuple[float, Dict[str, flo
         an_i += float(ANIMAL_WEIGHTS.get(animal, DEFAULT_UNKNOWN_ANIMAL_WEIGHT))
 
     wa_i = 1.0 if int(poi_counts.get("waterhole", 0)) > 0 or int(poi_counts.get("waterhole_dry", 0)) > 0 else 0.0
-    br_i = 1.0 if bool(node_feat.get("is_boarder", False)) else 0.0
     pl_i = 1.0 if bool(node_feat.get("has_plant", False)) else 0.0
     cov_i = 1.0 if int(poi_counts.get("patrol_house", 0)) > 0 or int(poi_counts.get("photo_trap", 0)) > 0 else 0.0
 
-    local_raw = an_i + W_WATER * wa_i + W_BORDER * br_i + W_PLANT * pl_i
+    local_raw = W_ANIMAL * an_i + W_WATER * wa_i + W_PLANT * pl_i
     s_i = local_raw * (1.0 - W_COVERAGE_PENALTY * cov_i)
 
     return s_i, {
         "AN_i": an_i,
         "WA_i": wa_i,
-        "BR_i": br_i,
         "PL_i": pl_i,
         "COV_i": cov_i,
     }
@@ -176,7 +174,7 @@ def compute_priorities(graph: Dict[str, Any], top_k_neighbors: int = TOP_K_NEIGH
     return {
         "meta": {
             "method": "local_score_plus_neighbors",
-            "formula_local": "S_i=(sum_{t in animals_present(i)}w(t)+0.30*WA_i+0.20*BR_i+0.10*PL_i)*(1-0.30*COV_i)",
+            "formula_local": "S_i=(1.00*sum_{t in animals_present(i)}w(t)+0.50*WA_i+0.50*PL_i)*(1-0.50*COV_i)",
             "formula_priority": "P_i=w0*S_i+w1*avg(N1)+w2*avg(FWD_topK), "
             "raw(h)=exp(-alpha*h), h in {0,1,2}, then normalize to sum=1 over available layers",
             "neighbor_scope": "N1 = direct neighbors; FWD_topK = up to top_k closest nodes by shortest-path time excluding self and N1",
