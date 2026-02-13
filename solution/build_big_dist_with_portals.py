@@ -321,20 +321,82 @@ def precompute_big_square_portal_routes_weight_over_distance(
 
 
 def build_dist_big_cells_with_portals(
-    out_path: str = "solution/big_dist_with_portals.json",
+    out_path: str = "solution/big_dist_with_portals_time_priority.json",
     k: int = 5,
+    speed_kmh: float = 40.0,
+    priority_path: str = "solution/etosha_node_priority_compact_clamped.json",
 ):
     sides = ("N", "S", "E", "W")
     small_graph_path = _resolve_read_path("solution/etosha_grid_graph_with_big_squares.json")
     big_graph_path = _resolve_read_path("solution/etosha_big_square_graph_14x14.json")
     out_path_resolved = _resolve_write_path(out_path)
+    inf_json = 1e30
+    speed_m_per_h = speed_kmh * 1000.0
+    weight_keys = ("priority", "risk", "score", "heat", "value")
+    priority_path_resolved = _resolve_read_path(priority_path)
+
+    with open(small_graph_path, "r", encoding="utf-8") as f:
+        small = json.load(f)
 
     with open(big_graph_path, "r", encoding="utf-8") as f:
         big = json.load(f)
 
+    small_nodes = small["node_features"]
     big_nodes = big["node_features"]
     big_edges = big["edge_features"]
     big_ids = sorted(big_nodes.keys())
+
+    small_priority_by_cell = {}
+    priority_source = "small_node_features_fallback"
+    detected_priority_key = None
+
+    if os.path.exists(priority_path_resolved):
+        with open(priority_path_resolved, "r", encoding="utf-8") as f:
+            raw_pr = json.load(f)
+        if isinstance(raw_pr, dict):
+            for cid in small_nodes.keys():
+                try:
+                    small_priority_by_cell[cid] = float(raw_pr.get(cid, 0.0))
+                except Exception:
+                    small_priority_by_cell[cid] = 0.0
+            priority_source = priority_path_resolved
+
+    if not small_priority_by_cell:
+        candidate_keys = []
+        sample_nf = next(iter(small_nodes.values())) if small_nodes else {}
+        if isinstance(sample_nf, dict):
+            for kk in sample_nf.keys():
+                kl = str(kk).lower()
+                if any(tok in kl for tok in ("prior", "risk", "score", "heat", "value")):
+                    candidate_keys.append(kk)
+        for wk in weight_keys:
+            if wk not in candidate_keys:
+                candidate_keys.append(wk)
+
+        for kk in candidate_keys:
+            nonzero = 0
+            for cid, nf in small_nodes.items():
+                try:
+                    v = float(nf.get(kk, 0.0))
+                except Exception:
+                    v = 0.0
+                small_priority_by_cell[cid] = v
+                if abs(v) > 1e-12:
+                    nonzero += 1
+            if nonzero > 0:
+                detected_priority_key = str(kk)
+                priority_source = f"small_node_features[{kk}]"
+                break
+        else:
+            for cid in small_nodes.keys():
+                small_priority_by_cell[cid] = 0.0
+
+    nonzero_priority_cells = sum(1 for v in small_priority_by_cell.values() if abs(float(v)) > 1e-12)
+    print(
+        f"[build_dist] priority source: {priority_source} | "
+        f"nonzero cells: {nonzero_priority_cells}/{len(small_priority_by_cell)}"
+    )
+
     def _parse_big_id(bid: str):
         if not isinstance(bid, str) or not bid.startswith("br") or "_bc" not in bid:
             raise ValueError(f"Bad big-square id format: {bid}")
@@ -353,6 +415,41 @@ def build_dist_big_cells_with_portals(
         for bid in big_ids
     }
     raw_cache = {}
+    portals_side = {bid: {s: [] for s in sides} for bid in big_ids}
+    portal_idx_map = {bid: {s: {} for s in sides} for bid in big_ids}
+
+    small_meta = small.get("meta", {})
+    small_cell_size = float(small_meta.get("cell_size_m", 1000.0))
+    small_origin = small_meta.get("grid_origin_m", [0.0, 0.0])
+    small_ox = float(small_origin[0])
+    small_oy = float(small_origin[1])
+
+    small_rc = {}
+    small_xy = {}
+    for cid, nf in small_nodes.items():
+        rr = int(nf.get("row", 0))
+        cc = int(nf.get("col", 0))
+        small_rc[cid] = (rr, cc)
+        c = nf.get("centroid_m")
+        if isinstance(c, list) and len(c) == 2:
+            small_xy[cid] = (float(c[0]), float(c[1]))
+        else:
+            small_xy[cid] = (
+                small_ox + (cc + 0.5) * small_cell_size,
+                small_oy + (rr + 0.5) * small_cell_size,
+            )
+
+    small_adj = {}
+    for su, neis in small.get("edge_features", {}).items():
+        lst = small_adj.setdefault(su, [])
+        if not isinstance(neis, dict):
+            continue
+        for sv, ef in neis.items():
+            try:
+                sd = float(ef.get("distance_m", 1.0))
+            except Exception:
+                sd = 1.0
+            lst.append((sv, sd))
 
     def _extract_kxk_matrix(res):
         table = res.get("table", {})
@@ -394,6 +491,15 @@ def build_dist_big_cells_with_portals(
                     )
                     raw_cache[key] = res
                 inside_mat[bid][side_in][side_out] = _extract_kxk_matrix(res)
+                if side_in == side_out and not portals_side[bid][side_in]:
+                    portals_side[bid][side_in] = list(res.get("portals_in", []))
+
+    for bid in big_ids:
+        for side in sides:
+            plist = portals_side[bid][side]
+            idx_map = portal_idx_map[bid][side]
+            for idx, pid in enumerate(plist):
+                idx_map.setdefault(pid, []).append(idx)
 
     def _opposite(side):
         return {"N": "S", "S": "N", "E": "W", "W": "E"}[side]
@@ -413,21 +519,6 @@ def build_dist_big_cells_with_portals(
             return "N"
         return None
 
-    def _best_first_vector(first_block, side_out):
-        # dp_out[j] = min_{entry_side, i} mat(entry_side, side_out)[i][j]
-        dp = [math.inf for _ in range(k)]
-        for side_in in sides:
-            mat = inside_mat[first_block][side_in][side_out]
-            for j in range(k):
-                best = math.inf
-                for i in range(k):
-                    val = mat[i][j]
-                    if val < best:
-                        best = val
-                if best < dp[j]:
-                    dp[j] = best
-        return dp
-
     def _lex_better(a_big, a_inside, b_big, b_inside):
         # True if (a_big, a_inside) < (b_big, b_inside) lexicographically.
         if a_big < b_big - 1e-12:
@@ -436,13 +527,101 @@ def build_dist_big_cells_with_portals(
             return True
         return False
 
+    nearest_idx_cache = {}
+
+    def _nearest_portal_idx_by_small_distance(src_portal, target_portals):
+        key = (src_portal, tuple(target_portals))
+        if key in nearest_idx_cache:
+            return nearest_idx_cache[key]
+
+        if not target_portals:
+            nearest_idx_cache[key] = None
+            return None
+
+        target_set = set(target_portals)
+        if src_portal in target_set:
+            idx0 = target_portals.index(src_portal)
+            nearest_idx_cache[key] = idx0
+            return idx0
+
+        dist = {src_portal: 0.0}
+        pq = [(0.0, src_portal)]
+        while pq:
+            d, u = heapq.heappop(pq)
+            if d > dist.get(u, math.inf):
+                continue
+            if u in target_set:
+                idx = target_portals.index(u)
+                nearest_idx_cache[key] = idx
+                return idx
+            for v, w in small_adj.get(u, []):
+                nd = d + w
+                if nd < dist.get(v, math.inf):
+                    dist[v] = nd
+                    heapq.heappush(pq, (nd, v))
+
+        sx, sy = small_xy.get(src_portal, (0.0, 0.0))
+        best_i = 0
+        best_d2 = math.inf
+        for i, pid in enumerate(target_portals):
+            tx, ty = small_xy.get(pid, (0.0, 0.0))
+            d2 = (sx - tx) * (sx - tx) + (sy - ty) * (sy - ty)
+            if d2 < best_d2:
+                best_d2 = d2
+                best_i = i
+        nearest_idx_cache[key] = best_i
+        return best_i
+
+    def _matched_next_portal_id(u, v, side_out, p_out):
+        side_in_v = _opposite(side_out)
+        v_portals = portals_side[v][side_in_v]
+        if not v_portals:
+            return None
+
+        rc = small_rc.get(p_out)
+        if rc is not None:
+            rr, cc = rc
+            if side_out == "E":
+                target_rc = (rr, cc + 1)
+            elif side_out == "W":
+                target_rc = (rr, cc - 1)
+            elif side_out == "S":
+                target_rc = (rr + 1, cc)
+            elif side_out == "N":
+                target_rc = (rr - 1, cc)
+            else:
+                target_rc = None
+            if target_rc is not None:
+                for pid in v_portals:
+                    if small_rc.get(pid) == target_rc:
+                        return pid
+
+        idx = _nearest_portal_idx_by_small_distance(p_out, v_portals)
+        if idx is None:
+            return None
+        if idx < 0 or idx >= len(v_portals):
+            return None
+        return v_portals[idx]
+
+    boundary_match = {}
+    for u in big_ids:
+        for v, ef in big_edges.get(u, {}).items():
+            if ef.get("is_diagonal"):
+                continue
+            side_out = _side_out_from_to(u, v)
+            if side_out is None:
+                continue
+            for p_out in portals_side[u][side_out]:
+                boundary_match[(u, v, p_out)] = _matched_next_portal_id(u, v, side_out, p_out)
+
     def _state_dijkstra_from(src):
-        # State: (node, entry_side, entry_portal_idx)
+        # State: (node, entry_side, entry_portal_cell_id)
         # entry_side in {"N","S","E","W"} for non-source states.
         state_best = {}
+        state_parent = {}
         pq = []
 
-        # First step from source: choose neighbor side_out and start vector on source.
+        # Boundary-start: inside cost in source block is 0; choose any portal on outgoing side.
         for nxt, ef in big_edges.get(src, {}).items():
             if ef.get("is_diagonal"):
                 continue
@@ -451,31 +630,34 @@ def build_dist_big_cells_with_portals(
                 continue
             side_in_next = _opposite(side_out)
             edge_d = float(ef.get("distance_m", 1.0))
-            start_vec = _best_first_vector(src, side_out)
-            for j in range(k):
-                inside_part = start_vec[j]
-                if not math.isfinite(inside_part):
+            for p_out in portals_side[src][side_out]:
+                p_in_next = boundary_match.get((src, nxt, p_out))
+                if p_in_next is None:
                     continue
-                key = (nxt, side_in_next, j)
+                key = (nxt, side_in_next, p_in_next)
                 cand_big = edge_d
-                cand_inside = inside_part
+                cand_inside = 0.0
                 old = state_best.get(key, (math.inf, math.inf))
                 if _lex_better(cand_big, cand_inside, old[0], old[1]):
                     state_best[key] = (cand_big, cand_inside)
-                    heapq.heappush(pq, (cand_big, cand_inside, nxt, side_in_next, j))
+                    state_parent[key] = None
+                    heapq.heappush(pq, (cand_big, cand_inside, nxt, side_in_next, p_in_next))
 
-        # Best by destination node (include src itself as zero).
-        node_best = {src: (0.0, 0.0)}
+        # Best by destination node and corresponding best end state.
+        node_best_pair = {src: (0.0, 0.0)}
+        node_best_state = {src: None}
 
         while pq:
-            cur_big, cur_inside, u, entry_side, entry_idx = heapq.heappop(pq)
-            best_pair = state_best.get((u, entry_side, entry_idx), (math.inf, math.inf))
+            cur_big, cur_inside, u, entry_side, entry_portal = heapq.heappop(pq)
+            cur_key = (u, entry_side, entry_portal)
+            best_pair = state_best.get(cur_key, (math.inf, math.inf))
             if abs(cur_big - best_pair[0]) > 1e-12 or abs(cur_inside - best_pair[1]) > 1e-12:
                 continue
 
-            old_node = node_best.get(u, (math.inf, math.inf))
+            old_node = node_best_pair.get(u, (math.inf, math.inf))
             if _lex_better(cur_big, cur_inside, old_node[0], old_node[1]):
-                node_best[u] = (cur_big, cur_inside)
+                node_best_pair[u] = (cur_big, cur_inside)
+                node_best_state[u] = cur_key
 
             for v, ef in big_edges.get(u, {}).items():
                 if ef.get("is_diagonal"):
@@ -486,32 +668,143 @@ def build_dist_big_cells_with_portals(
                 side_in_next = _opposite(side_out)
                 edge_d = float(ef.get("distance_m", 1.0))
                 mat = inside_mat[u][entry_side][side_out]
+                entry_idx_list = portal_idx_map[u][entry_side].get(entry_portal, [])
+                if not entry_idx_list:
+                    continue
 
-                for j in range(k):
-                    portal_cost = mat[entry_idx][j]
+                for idx_out, p_out in enumerate(portals_side[u][side_out]):
+                    p_in_next = boundary_match.get((u, v, p_out))
+                    if p_in_next is None:
+                        continue
+                    portal_cost = math.inf
+                    for idx_in in entry_idx_list:
+                        val = mat[idx_in][idx_out]
+                        if val < portal_cost:
+                            portal_cost = val
                     if not math.isfinite(portal_cost):
                         continue
                     cand_big = cur_big + edge_d
                     cand_inside = cur_inside + portal_cost
-                    key = (v, side_in_next, j)
+                    key = (v, side_in_next, p_in_next)
                     old = state_best.get(key, (math.inf, math.inf))
                     if _lex_better(cand_big, cand_inside, old[0], old[1]):
                         state_best[key] = (cand_big, cand_inside)
-                        heapq.heappush(pq, (cand_big, cand_inside, v, side_in_next, j))
+                        state_parent[key] = (cur_key, p_out)
+                        heapq.heappush(pq, (cand_big, cand_inside, v, side_in_next, p_in_next))
 
-        return node_best
+        return state_best, state_parent, node_best_pair, node_best_state
+
+    def _reconstruct_state_chain(end_state, state_parent):
+        if end_state is None:
+            return []
+        chain = []
+        cur = end_state
+        seen = set()
+        while cur is not None:
+            if cur in seen:
+                return []
+            seen.add(cur)
+            chain.append(cur)
+            parent_rec = state_parent.get(cur)
+            if parent_rec is None:
+                cur = None
+            else:
+                cur = parent_rec[0]
+        chain.reverse()
+        return chain
+
+    def _small_priority_sum_for_chain(src, dst, chain_states):
+        # chain_states contains states for nodes after src, ending at dst.
+        # boundary-end: no inside movement in dst.
+        if src == dst or len(chain_states) <= 1:
+            return 0.0
+
+        used_cells = set()
+        total_p = 0.0
+
+        for t in range(len(chain_states) - 1):
+            cur_state = chain_states[t]
+            nxt_state = chain_states[t + 1]
+            u = cur_state[0]
+            if u == dst:
+                break
+            side_in = cur_state[1]
+            pin = cur_state[2]
+            side_out = _side_out_from_to(u, nxt_state[0])
+            if side_out is None:
+                continue
+            parent_rec = state_parent.get(nxt_state)
+            if parent_rec is None:
+                continue
+            prev_state, pout = parent_rec
+            if prev_state != cur_state:
+                continue
+
+            res = raw_cache.get((u, side_in, side_out))
+            if res is None:
+                res = precompute_big_square_portal_routes_weight_over_distance(
+                    u,
+                    side_in,
+                    side_out,
+                    k_portals_per_side=k,
+                    small_graph_path=small_graph_path,
+                    big_graph_path=big_graph_path,
+                )
+                raw_cache[(u, side_in, side_out)] = res
+
+            portals_in = list(res.get("portals_in", []))
+            portals_out = list(res.get("portals_out", []))
+            if pin not in portals_in or pout not in portals_out:
+                continue
+            rec = res.get("table", {}).get(pin, {}).get(pout, {})
+            path = rec.get("path")
+            if not isinstance(path, list):
+                continue
+
+            for cid in path:
+                if cid not in used_cells:
+                    used_cells.add(cid)
+                    total_p += float(small_priority_by_cell.get(cid, 0.0))
+
+        return float(total_p)
 
     dist_out = {i: {} for i in big_ids}
     t0 = time.time()
     total_sources = len(big_ids)
     for idx_src, i in enumerate(big_ids, start=1):
-        node_best = _state_dijkstra_from(i)
+        state_best, state_parent, node_best_pair, node_best_state = _state_dijkstra_from(i)
         for j in big_ids:
-            pair = node_best.get(j)
-            if pair is None:
-                dist_out[i][j] = math.inf
+            if i == j:
+                dist_out[i][j] = {
+                    "distance_m": 0.0,
+                    "time_h": 0.0,
+                    "small_priority_sum": 0.0,
+                }
+                continue
+
+            pair = node_best_pair.get(j)
+            end_state = node_best_state.get(j)
+            if pair is None or end_state is None:
+                dist_out[i][j] = {
+                    "distance_m": inf_json,
+                    "time_h": inf_json,
+                    "small_priority_sum": inf_json,
+                }
             else:
-                dist_out[i][j] = float(pair[0] + pair[1])
+                dist_m = float(pair[0] + pair[1])
+                if not math.isfinite(dist_m):
+                    dist_m = inf_json
+                    time_h = inf_json
+                    pr_sum = inf_json
+                else:
+                    time_h = float(dist_m / speed_m_per_h)
+                    chain = _reconstruct_state_chain(end_state, state_parent)
+                    pr_sum = _small_priority_sum_for_chain(i, j, chain)
+                dist_out[i][j] = {
+                    "distance_m": dist_m,
+                    "time_h": time_h,
+                    "small_priority_sum": pr_sum,
+                }
 
         elapsed = time.time() - t0
         done = idx_src
@@ -522,25 +815,25 @@ def build_dist_big_cells_with_portals(
             f"elapsed={elapsed:.1f}s | eta={eta:.1f}s"
         )
 
-    # JSON-safe conversion: replace non-finite distances.
-    INF_JSON = 1e30
-    for i in big_ids:
-        for j in big_ids:
-            v = dist_out[i][j]
-            if not math.isfinite(v):
-                dist_out[i][j] = INF_JSON
-
     payload = {
         "meta": {
-            "method": "state_dijkstra_lexicographic_big_then_inside_portal_dp",
+            "method": "state_dijkstra_lexicographic_big_then_inside_portal_dp_boundary_to_boundary_portal_cell_matched",
             "k_portals_per_side": int(k),
             "sides": list(sides),
             "big_cell_count": len(big_ids),
+            "speed_kmh_for_time": float(speed_kmh),
             "small_graph_path": small_graph_path,
             "big_graph_path": big_graph_path,
             "inside_cost_model": "k_by_k_portal_matrix_dp",
             "diagonal_big_edges_used": False,
-            "json_inf_replacement": 1e30,
+            "small_priority_sum_mode": "unique_small_cell_ids_on_intermediate_big_blocks",
+            "weight_keys": list(weight_keys),
+            "priority_source": priority_source,
+            "priority_path_requested": priority_path,
+            "priority_path_resolved": priority_path_resolved,
+            "detected_priority_key": detected_priority_key,
+            "nonzero_priority_cells": int(nonzero_priority_cells),
+            "inf_replacement": inf_json,
             "out_path": out_path_resolved,
         },
         "dist": dist_out,
@@ -555,5 +848,191 @@ def build_dist_big_cells_with_portals(
     return payload
 
 
+def build_patrol_house_to_big_cell(
+    out_path: str = "solution/patrol_house_to_big_cell.json",
+    k: int = 5,
+    speed_kmh: float = 40.0,
+):
+    sides = ("N", "S", "E", "W")
+    small_graph_path = _resolve_read_path("solution/etosha_grid_graph_with_big_squares.json")
+    big_graph_path = _resolve_read_path("solution/etosha_big_square_graph_14x14.json")
+    out_path_resolved = _resolve_write_path(out_path)
+    inf_json = 1e30
+    speed_m_per_h = speed_kmh * 1000.0
+
+    with open(small_graph_path, "r", encoding="utf-8") as f:
+        small = json.load(f)
+    with open(big_graph_path, "r", encoding="utf-8") as f:
+        big = json.load(f)
+
+    small_nodes = small.get("node_features", {})
+    small_edges = small.get("edge_features", {})
+    big_ids = sorted(big.get("node_features", {}).keys())
+
+    def _is_cell_id(x):
+        return isinstance(x, str) and x.startswith("r") and "_c" in x
+
+    def _contains_patrol_word(text: str) -> bool:
+        t = text.lower()
+        return ("patrol" in t) or ("ranger" in t) or ("house" in t) or ("post" in t)
+
+    def _collect_patrol_house_cell_ids():
+        found = set()
+        meta = small.get("meta", {})
+        for key in ("patrol_house_cell_ids", "patrol_houses", "patrol_house_cells", "ranger_post_cell_ids"):
+            val = meta.get(key)
+            if isinstance(val, list):
+                for x in val:
+                    if _is_cell_id(x):
+                        found.add(x)
+            elif isinstance(val, dict):
+                for x in val.keys():
+                    if _is_cell_id(x):
+                        found.add(x)
+                for x in val.values():
+                    if _is_cell_id(x):
+                        found.add(x)
+                    if isinstance(x, list):
+                        for y in x:
+                            if _is_cell_id(y):
+                                found.add(y)
+
+        if found:
+            return sorted(found)
+
+        for cid, nf in small_nodes.items():
+            poi = nf.get("poi_type_counts")
+            hit = False
+            if isinstance(poi, dict):
+                for k0, v0 in poi.items():
+                    try:
+                        cnt = float(v0)
+                    except Exception:
+                        cnt = 0.0
+                    if cnt > 0 and _contains_patrol_word(str(k0)):
+                        hit = True
+                        break
+            if not hit:
+                for key in ("poi_type", "category", "type", "kind", "name"):
+                    v = nf.get(key)
+                    if isinstance(v, str) and _contains_patrol_word(v):
+                        hit = True
+                        break
+                    if isinstance(v, list):
+                        for vv in v:
+                            if isinstance(vv, str) and _contains_patrol_word(vv):
+                                hit = True
+                                break
+                        if hit:
+                            break
+            if hit:
+                found.add(cid)
+        return sorted(found)
+
+    patrol_house_cell_ids = _collect_patrol_house_cell_ids()
+
+    # Build small-graph adjacency once.
+    small_adj = {}
+    for u, neis in small_edges.items():
+        lst = small_adj.setdefault(u, [])
+        if not isinstance(neis, dict):
+            continue
+        for v, ef in neis.items():
+            try:
+                d = float(ef.get("distance_m", 1.0))
+            except Exception:
+                d = 1.0
+            lst.append((v, d))
+
+    # Gather portals on each side and all-side union for each big cell.
+    side_portals = {}
+    portals_all_by_big = {}
+    for bid in big_ids:
+        all_p = []
+        for side in sides:
+            res = precompute_big_square_portal_routes_weight_over_distance(
+                bid,
+                side,
+                side,
+                k_portals_per_side=k,
+                small_graph_path=small_graph_path,
+                big_graph_path=big_graph_path,
+            )
+            p = list(res.get("portals_in", []))
+            side_portals[(bid, side)] = p
+            all_p.extend(p)
+        portals_all_by_big[bid] = all_p
+
+    def _dijkstra_small_from(src):
+        dist = {src: 0.0}
+        pq = [(0.0, src)]
+        while pq:
+            d, u = heapq.heappop(pq)
+            if d > dist.get(u, math.inf):
+                continue
+            for v, w in small_adj.get(u, []):
+                nd = d + w
+                if nd < dist.get(v, math.inf):
+                    dist[v] = nd
+                    heapq.heappush(pq, (nd, v))
+        return dist
+
+    out_rows = []
+    t0 = time.time()
+    total = len(patrol_house_cell_ids)
+    for idx, ph in enumerate(patrol_house_cell_ids, start=1):
+        d_small = _dijkstra_small_from(ph)
+        to_big = {}
+        for bid in big_ids:
+            best = math.inf
+            for p in portals_all_by_big.get(bid, []):
+                dp = d_small.get(p, math.inf)
+                if dp < best:
+                    best = dp
+            if not math.isfinite(best):
+                dist_m = inf_json
+                time_h = inf_json
+            else:
+                dist_m = float(best)
+                time_h = float(dist_m / speed_m_per_h)
+            to_big[bid] = {"distance_m": dist_m, "time_h": time_h}
+        out_rows.append({"cell_id": ph, "to_big": to_big})
+
+        elapsed = time.time() - t0
+        left = total - idx
+        eta = (elapsed / idx) * left if idx > 0 else math.inf
+        print(
+            f"[patrol_to_big] {idx}/{total} houses done | "
+            f"elapsed={elapsed:.1f}s | eta={eta:.1f}s"
+        )
+
+    payload = {
+        "meta": {
+            "method": "min_small_graph_distance_to_any_big_cell_portal",
+            "k_portals_per_side": int(k),
+            "sides": list(sides),
+            "speed_kmh_for_time": float(speed_kmh),
+            "small_graph_path": small_graph_path,
+            "big_graph_path": big_graph_path,
+            "patrol_house_count": len(patrol_house_cell_ids),
+            "inf_replacement": inf_json,
+            "out_path": out_path_resolved,
+        },
+        "patrol_house_cell_ids": patrol_house_cell_ids,
+        "patrol_houses": out_rows,
+    }
+
+    out_dir = os.path.dirname(out_path_resolved)
+    if out_dir:
+        os.makedirs(out_dir, exist_ok=True)
+    with open(out_path_resolved, "w", encoding="utf-8") as f:
+        json.dump(payload, f, ensure_ascii=False)
+
+    return payload
+
+
 if __name__ == "__main__":
-    build_dist_big_cells_with_portals()
+    payload_dist = build_dist_big_cells_with_portals()
+    payload_patrol = build_patrol_house_to_big_cell()
+    print("[saved] big dist file:", payload_dist.get("meta", {}).get("out_path"))
+    print("[saved] patrol->big file:", payload_patrol.get("meta", {}).get("out_path"))
