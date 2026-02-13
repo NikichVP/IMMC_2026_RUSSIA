@@ -73,7 +73,7 @@ def compute_local_score(node_feat: Dict[str, Any]) -> Tuple[float, Dict[str, flo
         an_i += float(ANIMAL_WEIGHTS.get(animal, DEFAULT_UNKNOWN_ANIMAL_WEIGHT))
 
     wa_i = 1.0 if int(poi_counts.get("waterhole", 0)) > 0 or int(poi_counts.get("waterhole_dry", 0)) > 0 else 0.0
-    br_i = 1.0 if bool(node_feat.get("is_boarder", False)) else 0.0
+    br_i = 1.0 if bool(node_feat.get("is_boarder", node_feat.get("is_border", False))) else 0.0
     pl_i = 1.0 if bool(node_feat.get("has_plant", False)) else 0.0
     cov_i = 1.0 if int(poi_counts.get("patrol_house", 0)) > 0 or int(poi_counts.get("photo_trap", 0)) > 0 else 0.0
 
