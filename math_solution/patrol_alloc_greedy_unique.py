@@ -7,12 +7,43 @@ import random
 import sys
 from typing import Dict, Iterable, List, Optional, Set, Tuple
 
+try:
+    import select_sound_border_cells as sound_select
+except ModuleNotFoundError:
+    try:
+        from math_solution import select_sound_border_cells as sound_select
+    except ModuleNotFoundError:
+        sound_select = None
+
 
 INF = float("inf")
 EPS = 1e-12
 SIDES = ("N", "S", "E", "W")
 OVERLAP_ALPHA = 1.0
 OVERLAP_HARD_MAX_USE = 1
+DEFAULT_SPEED_KMH = 40.0
+RANDOM_TIE_LOW = 0.9
+RANDOM_TIE_HIGH = 1.1
+SCORE_DENOM_EPS = 1e-12
+PROGRESS_PRINT_STEP = 32
+SEED_MUL_A = 1000003
+SEED_MUL_B = 911382323
+
+DEFAULT_DIST_PATH = "solution/big_dist_with_portals_time_priority.json"
+DEFAULT_PATROL_PATH = "solution/patrol_house_to_big_cell.json"
+DEFAULT_BIGGRAPH_PATH = "solution/etosha_big_square_graph_14x14.json"
+DEFAULT_PRIORITY_PATH = "solution/etosha_node_priority_compact_clamped.json"
+DEFAULT_KMIN = 1
+DEFAULT_KMAX = 10
+DEFAULT_TLIM_H = 12.0
+DEFAULT_TOPL = None
+DEFAULT_SEED = 1
+DEFAULT_SCORE_GAIN_POW = 1.35
+DEFAULT_SCORE_TIME_POW = 0.75
+DEFAULT_OUT_PATH = "solution/patrol_alloc_greedy_unique_result.json"
+
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+PROJECT_DIR = os.path.dirname(SCRIPT_DIR)
 
 
 def gen_compositions(K: int, H: int = 8) -> Iterable[List[int]]:
@@ -26,10 +57,41 @@ def gen_compositions(K: int, H: int = 8) -> Iterable[List[int]]:
             yield [x] + tail
 
 
-def _load_json(path: str) -> dict:
-    if not os.path.exists(path):
+def _resolve_read_path(path: str) -> str:
+    if os.path.isabs(path):
+        if os.path.exists(path):
+            return path
         raise FileNotFoundError(f"File not found: {path}")
-    with open(path, "r", encoding="utf-8") as f:
+
+    candidates = [path, os.path.join(PROJECT_DIR, path), os.path.join(SCRIPT_DIR, path)]
+    if path.startswith("solution/"):
+        tail = path[len("solution/") :]
+        candidates.extend([os.path.join(PROJECT_DIR, tail), os.path.join(SCRIPT_DIR, tail)])
+
+    seen = set()
+    for c in candidates:
+        ac = os.path.abspath(c)
+        if ac in seen:
+            continue
+        seen.add(ac)
+        if os.path.exists(ac):
+            return ac
+    raise FileNotFoundError(f"File not found: {path}")
+
+
+def _resolve_write_path(path: str) -> str:
+    if os.path.isabs(path):
+        return path
+    if path.startswith("solution/"):
+        return os.path.join(PROJECT_DIR, path)
+    if path.startswith("math_solution/"):
+        return os.path.join(PROJECT_DIR, path)
+    return os.path.abspath(path)
+
+
+def _load_json(path: str) -> dict:
+    resolved = _resolve_read_path(path)
+    with open(resolved, "r", encoding="utf-8") as f:
         return json.load(f)
 
 
@@ -151,7 +213,7 @@ def load_side_transition_model(
     meta = dist_payload.get("meta", {}) if isinstance(dist_payload, dict) else {}
     speed_kmh = _safe_float(meta.get("speed_kmh_for_time"))
     if not math.isfinite(speed_kmh) or speed_kmh <= 0.0:
-        speed_kmh = 40.0
+        speed_kmh = DEFAULT_SPEED_KMH
     speed_m_per_h = speed_kmh * 1000.0
 
     biggraph = _load_json(biggraph_path)
@@ -307,7 +369,7 @@ def load_side_transition_model(
                 cur = prev_state
             leg_trans[src][dst] = trans_counter
 
-        if src_idx % 32 == 0 or src_idx == len(big_ids):
+        if src_idx % PROGRESS_PRINT_STEP == 0 or src_idx == len(big_ids):
             print(f"[side_model] {src_idx}/{len(big_ids)} sources prepared")
 
     model = {
@@ -358,8 +420,14 @@ def build_S_big(biggraph_path: str, priority_path: str) -> Dict[str, float]:
         raise ValueError(f"Invalid biggraph format in: {biggraph_path}")
 
     priority: Dict[str, float]
-    if os.path.exists(priority_path):
-        payload = _load_json(priority_path)
+    resolved_priority_path: Optional[str] = None
+    try:
+        resolved_priority_path = _resolve_read_path(priority_path)
+    except FileNotFoundError:
+        resolved_priority_path = None
+
+    if resolved_priority_path is not None:
+        payload = _load_json(resolved_priority_path)
         if not isinstance(payload, dict):
             raise ValueError(f"Invalid priority format in: {priority_path}")
         priority = {}
@@ -684,7 +752,7 @@ class Patrol:
                 self.edge_bucket[best_j].add(y)
 
 
-def _is_better(cur: Optional[dict], best: Optional[dict], eps: float = 1e-12) -> bool:
+def _is_better(cur: Optional[dict], best: Optional[dict], eps: float = EPS) -> bool:
     if cur is None:
         return False
     if best is None:
@@ -696,6 +764,29 @@ def _is_better(cur: Optional[dict], best: Optional[dict], eps: float = 1e-12) ->
     return False
 
 
+def _is_better_total_coverage(cur: Optional[dict], best: Optional[dict], eps: float = EPS) -> bool:
+    if cur is None:
+        return False
+    if best is None:
+        return True
+    if cur["total_coverage_priority"] > best["total_coverage_priority"] + eps:
+        return True
+    if abs(cur["total_coverage_priority"] - best["total_coverage_priority"]) <= eps:
+        if cur["total_priority"] > best["total_priority"] + eps:
+            return True
+        if abs(cur["total_priority"] - best["total_priority"]) <= eps:
+            return cur["total_time_h"] < best["total_time_h"] - eps
+    return False
+
+
+def _sound_coverage_km(sound_budget: float, cost_per_km: float, border_km: float) -> float:
+    if cost_per_km <= 0.0:
+        raise ValueError("sound_tracker_cost_per_km must be > 0")
+    if border_km < 0.0:
+        raise ValueError("total_border_km must be >= 0")
+    return min(border_km, max(0.0, sound_budget) / cost_per_km)
+
+
 def solve_one_distribution(
     K: int,
     m: List[int],
@@ -704,6 +795,8 @@ def solve_one_distribution(
     S: Dict[str, float],
     model: dict,
     Tlim: float,
+    score_gain_pow: float,
+    score_time_pow: float,
     rng: random.Random,
 ) -> dict:
     if K <= 0:
@@ -765,7 +858,10 @@ def solve_one_distribution(
 
             overlap_delta = _overlap_delta_from_ops(trans_use_global, ops)
             overlap_penalty = 1.0 + OVERLAP_ALPHA * max(0, overlap_delta)
-            score = (gain / d) * rng.uniform(0.9, 1.1) / overlap_penalty
+            gain_term = gain if abs(score_gain_pow - 1.0) <= EPS else (gain ** score_gain_pow)
+            time_term = d if abs(score_time_pow - 1.0) <= EPS else (d ** score_time_pow)
+            denom = time_term if time_term > 0.0 else SCORE_DENOM_EPS
+            score = (gain_term / denom) * rng.uniform(RANDOM_TIE_LOW, RANDOM_TIE_HIGH) / overlap_penalty
             if score > best_score:
                 best_score = score
                 best_idx = i
@@ -815,6 +911,7 @@ def solve_one_distribution(
 
 
 def search_best(
+    Kmin: int,
     Kmax: int,
     Tlim: float,
     houses_big_ids: List[str],
@@ -822,14 +919,42 @@ def search_best(
     S: Dict[str, float],
     model: dict,
     seed: int,
-) -> Tuple[Optional[dict], List[dict]]:
+    score_gain_pow: float,
+    score_time_pow: float,
+    budget_total_for_patrol_sound: Optional[float] = None,
+    patrol_cost: Optional[float] = None,
+    sound_tracker_cost_per_km: Optional[float] = None,
+    total_border_km: Optional[float] = None,
+    sound_graph_path: Optional[str] = None,
+    sound_priority_path: Optional[str] = None,
+    sound_score_field: str = "priority_P_i",
+) -> Tuple[Optional[dict], List[dict], List[Optional[dict]]]:
     best_global: Optional[dict] = None
     per_K_best: List[dict] = []
+    per_K_full: List[Optional[dict]] = []
 
-    for K in range(1, Kmax + 1):
+    k_start = max(1, int(Kmin))
+    if Kmax < k_start:
+        return None, per_K_best, per_K_full
+
+    sound_args = [
+        budget_total_for_patrol_sound,
+        patrol_cost,
+        sound_tracker_cost_per_km,
+        total_border_km,
+        sound_graph_path,
+        sound_priority_path,
+    ]
+    sound_enabled = all(x is not None for x in sound_args)
+    if any(x is not None for x in sound_args) and not sound_enabled:
+        raise ValueError("Sound budget integration requires all sound-related arguments")
+    if sound_enabled and sound_select is None:
+        raise ValueError("select_sound_border_cells module is unavailable")
+
+    for K in range(k_start, Kmax + 1):
         best_k: Optional[dict] = None
         for comp_idx, m in enumerate(gen_compositions(K, 8)):
-            local_seed = (seed * 1000003) ^ (K * 911382323) ^ comp_idx
+            local_seed = (seed * SEED_MUL_A) ^ (K * SEED_MUL_B) ^ comp_idx
             rng = random.Random(local_seed)
             res = solve_one_distribution(
                 K=K,
@@ -839,44 +964,87 @@ def search_best(
                 S=S,
                 model=model,
                 Tlim=Tlim,
+                score_gain_pow=score_gain_pow,
+                score_time_pow=score_time_pow,
                 rng=rng,
             )
             if _is_better(res, best_k):
                 best_k = res
 
         if best_k is None:
-            per_K_best.append({"K": K, "m": [0] * 8, "total_priority": 0.0, "total_time_h": 0.0})
+            base_row = {"K": K, "m": [0] * 8, "total_priority": 0.0, "total_time_h": 0.0}
+            per_K_full.append(None)
         else:
-            per_K_best.append(
-                {
-                    "K": K,
-                    "m": list(best_k["m"]),
-                    "total_priority": best_k["total_priority"],
-                    "total_time_h": best_k["total_time_h"],
-                }
+            base_row = {
+                "K": K,
+                "m": list(best_k["m"]),
+                "total_priority": float(best_k["total_priority"]),
+                "total_time_h": float(best_k["total_time_h"]),
+            }
+            per_K_full.append(best_k)
+
+        if sound_enabled:
+            sound_budget = float(budget_total_for_patrol_sound) - float(K) * float(patrol_cost)
+            sound_km = _sound_coverage_km(
+                sound_budget=sound_budget,
+                cost_per_km=float(sound_tracker_cost_per_km),
+                border_km=float(total_border_km),
             )
-            if _is_better(best_k, best_global):
+            sound_result = sound_select.build_sound_selection(
+                sound_km=sound_km,
+                graph_path=str(sound_graph_path),
+                priority_path=str(sound_priority_path),
+                score_field=sound_score_field,
+            )
+            sound_priority = float(sound_result.get("meta", {}).get("selected_priority_sum", 0.0))
+            row = dict(base_row)
+            row["patrol_spent_total"] = float(K) * float(patrol_cost)
+            row["sound_budget"] = sound_budget
+            row["sound_covered_km"] = sound_km
+            row["sound_priority"] = sound_priority
+            row["total_coverage_priority"] = float(row["total_priority"]) + sound_priority
+            row["sound_selection"] = sound_result
+            per_K_best.append(row)
+
+            if best_k is not None:
+                cand = dict(best_k)
+                cand["patrol_spent_total"] = row["patrol_spent_total"]
+                cand["sound_budget"] = sound_budget
+                cand["sound_covered_km"] = sound_km
+                cand["sound_priority"] = sound_priority
+                cand["total_coverage_priority"] = row["total_coverage_priority"]
+                cand["sound_selection"] = sound_result
+                if _is_better_total_coverage(cand, best_global):
+                    best_global = cand
+        else:
+            per_K_best.append(base_row)
+            if best_k is not None and _is_better(best_k, best_global):
                 best_global = best_k
 
-    return best_global, per_K_best
+    return best_global, per_K_best, per_K_full
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Greedy unique patrol allocation on big cells")
-    parser.add_argument("--dist", default="solution/big_dist_with_portals_time_priority.json")
-    parser.add_argument("--patrol", default="solution/patrol_house_to_big_cell.json")
-    parser.add_argument("--biggraph", default="solution/etosha_big_square_graph_14x14.json")
-    parser.add_argument("--priority", default="solution/etosha_node_priority_compact_clamped.json")
-    parser.add_argument("--Kmax", type=int, default=10)
-    parser.add_argument("--Tlim", type=float, default=12.0)
-    parser.add_argument("--topL", type=int, default=None)
-    parser.add_argument("--seed", type=int, default=1)
-    parser.add_argument("--out", default="solution/patrol_alloc_greedy_unique_result.json")
+    parser.add_argument("--dist", default=DEFAULT_DIST_PATH)
+    parser.add_argument("--patrol", default=DEFAULT_PATROL_PATH)
+    parser.add_argument("--biggraph", default=DEFAULT_BIGGRAPH_PATH)
+    parser.add_argument("--priority", default=DEFAULT_PRIORITY_PATH)
+    parser.add_argument("--Kmin", type=int, default=DEFAULT_KMIN)
+    parser.add_argument("--Kmax", type=int, default=DEFAULT_KMAX)
+    parser.add_argument("--Tlim", type=float, default=DEFAULT_TLIM_H)
+    parser.add_argument("--topL", type=int, default=DEFAULT_TOPL)
+    parser.add_argument("--seed", type=int, default=DEFAULT_SEED)
+    parser.add_argument("--score-gain-pow", type=float, default=DEFAULT_SCORE_GAIN_POW)
+    parser.add_argument("--score-time-pow", type=float, default=DEFAULT_SCORE_TIME_POW)
+    parser.add_argument("--out", default=DEFAULT_OUT_PATH)
     return parser.parse_args()
 
 
 def main() -> int:
     args = parse_args()
+    if args.score_gain_pow <= 0.0 or args.score_time_pow <= 0.0:
+        raise ValueError("--score-gain-pow and --score-time-pow must be > 0")
 
     model, dist_big_ids = load_side_transition_model(args.dist, args.biggraph)
     houses_big_ids = load_houses_from_patrol_json(args.patrol)
@@ -888,7 +1056,8 @@ def main() -> int:
     if args.topL is not None:
         cands_sorted = cands_sorted[: max(0, args.topL)]
 
-    best, per_K_best = search_best(
+    best, per_K_best, _ = search_best(
+        Kmin=args.Kmin,
         Kmax=args.Kmax,
         Tlim=args.Tlim,
         houses_big_ids=houses_big_ids,
@@ -896,14 +1065,19 @@ def main() -> int:
         S=S,
         model=model,
         seed=args.seed,
+        score_gain_pow=args.score_gain_pow,
+        score_time_pow=args.score_time_pow,
     )
 
     out_payload = {
         "meta": {
             "Kmax": args.Kmax,
+            "Kmin": args.Kmin,
             "Tlim": args.Tlim,
             "topL": args.topL,
             "seed": args.seed,
+            "score_gain_pow": args.score_gain_pow,
+            "score_time_pow": args.score_time_pow,
             "dist_path": args.dist,
             "patrol_path": args.patrol,
             "biggraph_path": args.biggraph,
@@ -913,10 +1087,11 @@ def main() -> int:
         "per_K_best": per_K_best,
     }
 
-    out_dir = os.path.dirname(args.out)
+    out_path = _resolve_write_path(args.out)
+    out_dir = os.path.dirname(out_path)
     if out_dir:
         os.makedirs(out_dir, exist_ok=True)
-    with open(args.out, "w", encoding="utf-8") as f:
+    with open(out_path, "w", encoding="utf-8") as f:
         json.dump(out_payload, f, ensure_ascii=False, indent=2)
 
     if best is None:

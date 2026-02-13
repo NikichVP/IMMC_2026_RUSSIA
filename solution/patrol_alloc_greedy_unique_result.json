@@ -4,6 +4,8 @@
     "Tlim": 12.0,
     "topL": 180,
     "seed": 1,
+    "score_gain_pow": 1.35,
+    "score_time_pow": 0.75,
     "dist_path": "solution/big_dist_with_portals_time_priority.json",
     "patrol_path": "solution/patrol_house_to_big_cell.json",
     "biggraph_path": "solution/etosha_big_square_graph_14x14.json",

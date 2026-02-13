@@ -1,2 +1,15 @@
-*__pycache__
+__pycache__/
+*.py[cod]
+.DS_Store
+
+# Generated local artifacts
 etosha_node_priority.json
+
+# Smoke/debug outputs
+math_solution/*_smoke*.json
+math_solution/math_model_result*.json
+math_solution/patrol_alloc_greedy_unique_result*.json
+
+# Generated figures/results (local)
+solution/patrol_alloc_*.png
+solution/patrol_alloc_greedy_unique_result*.json

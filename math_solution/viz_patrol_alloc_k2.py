@@ -154,6 +154,40 @@ def _small_grid_layers(smallgraph: dict) -> dict:
     }
 
 
+def _small_priority_layers(smallgraph: dict, priority_small: Dict[str, float]) -> dict:
+    meta = smallgraph.get("meta", {})
+    node_features = smallgraph.get("node_features")
+    if not isinstance(node_features, dict):
+        raise ValueError("Invalid smallgraph: missing node_features")
+
+    n_rows, n_cols = meta["grid_shape_rows_cols"]
+    cell_size = float(meta["cell_size_m"])
+    min_x, min_y = meta["grid_origin_m"]
+    max_x = min_x + n_cols * cell_size
+    max_y = min_y + n_rows * cell_size
+
+    inside_mask = np.zeros((n_rows, n_cols), dtype=bool)
+    outside_mask = np.zeros((n_rows, n_cols), dtype=bool)
+    pr_arr = np.zeros((n_rows, n_cols), dtype="float32")
+
+    for cid, nf in node_features.items():
+        rr = int(nf["row"])
+        cc = int(nf["col"])
+        if nf.get("median_elevation_m") is None:
+            outside_mask[rr, cc] = True
+            pr_arr[rr, cc] = 0.0
+        else:
+            inside_mask[rr, cc] = True
+            pr_arr[rr, cc] = float(priority_small.get(cid, 0.0))
+
+    return {
+        "inside_mask": inside_mask,
+        "outside_mask": outside_mask,
+        "priority_arr": pr_arr,
+        "extent": [min_x, max_x, min_y, max_y],
+    }
+
+
 def _extract_big_cells(biggraph: dict) -> Dict[str, dict]:
     meta = biggraph.get("meta", {})
     node_features = biggraph.get("node_features")
@@ -855,6 +889,7 @@ def _parse_routes(spec: str, patrol_count: int) -> List[int]:
 def _draw(
     result: dict,
     layers: dict,
+    pr_layers: dict,
     big_cells: Dict[str, dict],
     S: Dict[str, float],
     small_idx: dict,
@@ -871,9 +906,10 @@ def _draw(
 
     use_routes = _parse_routes(route_spec, len(patrols))
 
-    inside_mask = layers["inside_mask"]
-    road_m = layers["road_m"]
-    extent = layers["extent"]
+    inside_mask = pr_layers["inside_mask"]
+    outside_mask = pr_layers["outside_mask"]
+    priority_arr = pr_layers["priority_arr"]
+    extent = pr_layers["extent"]
 
     fig, ax = plt.subplots(1, 1, figsize=(13, 10), dpi=220)
     ax.set_aspect("equal")
@@ -882,7 +918,7 @@ def _draw(
     ax.set_xlabel("X (meters)")
     ax.set_ylabel("Y (meters)")
 
-    outside_img = np.where(~inside_mask, 1.0, np.nan)
+    outside_img = np.where(outside_mask, 1.0, np.nan)
     inside_img = np.where(inside_mask, 1.0, np.nan)
     ax.imshow(
         outside_img,
@@ -903,39 +939,24 @@ def _draw(
         zorder=2,
     )
 
-    road_km = np.where(road_m > 0.0, road_m / 1000.0, np.nan)
-    road_im = ax.imshow(
-        road_km,
+    inside_pr = np.where(inside_mask, priority_arr, np.nan)
+    vmax_pr = float(np.nanpercentile(inside_pr, 99.0)) if np.any(np.isfinite(inside_pr)) else 1.0
+    if vmax_pr <= 0.0:
+        vmax_pr = 1.0
+    im_pr = ax.imshow(
+        inside_pr,
         extent=extent,
         origin="lower",
-        cmap="Greys",
+        cmap="YlOrRd",
         interpolation="nearest",
-        alpha=0.72,
+        alpha=0.94,
         zorder=3,
     )
-
-    s_vals = np.array([S.get(bid, 0.0) for bid in big_cells.keys()], dtype="float64")
-    vmax = float(np.nanpercentile(s_vals, 99.0)) if np.any(np.isfinite(s_vals)) else 1.0
-    if vmax <= 0.0:
-        vmax = 1.0
-    norm = colors.Normalize(vmin=0.0, vmax=vmax)
-    cmap = plt.get_cmap("YlOrRd")
+    cbar_pr_small = fig.colorbar(im_pr, ax=ax, fraction=0.035, pad=0.02)
+    cbar_pr_small.set_label("Small-cell priority heatmap (clamped)")
 
     for bid, info in big_cells.items():
         x0, y0, x1, y1 = info["bbox"]
-        s = max(0.0, S.get(bid, 0.0))
-        if s > 0.0:
-            ax.add_patch(
-                Rectangle(
-                    (x0, y0),
-                    x1 - x0,
-                    y1 - y0,
-                    facecolor=cmap(norm(min(s, vmax))),
-                    edgecolor="none",
-                    alpha=0.38,
-                    zorder=4,
-                )
-            )
         ax.add_patch(
             Rectangle(
                 (x0, y0),
@@ -948,11 +969,19 @@ def _draw(
                 zorder=5,
             )
         )
-
-    sm = plt.cm.ScalarMappable(norm=norm, cmap=cmap)
-    sm.set_array([])
-    cbar_pr = fig.colorbar(sm, ax=ax, fraction=0.03, pad=0.08)
-    cbar_pr.set_label("Big-cell priority S")
+        cx, cy = info["center"]
+        s = max(0.0, S.get(bid, 0.0))
+        ax.text(
+            cx,
+            cy,
+            f"{s:.2f}",
+            fontsize=4.2,
+            color="#2e3d6b",
+            ha="center",
+            va="center",
+            alpha=0.92,
+            zorder=6,
+        )
 
     route_colors = ["#0057ff", "#ff2d20", "#19a974", "#a66bff", "#ff8c00", "#00a7a7"]
     legend_handles: List[Line2D] = []
@@ -1005,7 +1034,7 @@ def _draw(
         ax.legend(handles=legend_handles, loc="lower right", frameon=True, framealpha=0.92, fontsize=8)
 
     k_val = best.get("K")
-    ax.set_title(f"Detailed patrol routes on small grid (K={k_val})")
+    ax.set_title(f"Priority map + big-square boundaries + big-square priority labels | patrol routes (K={k_val})")
 
     fig.tight_layout()
     fig.savefig(out_png, dpi=220, bbox_inches="tight")
@@ -1036,6 +1065,7 @@ def main() -> int:
 
     S = _build_S_big(biggraph, priority_small)
     layers = _small_grid_layers(smallgraph)
+    pr_layers = _small_priority_layers(smallgraph, priority_small)
     big_cells = _extract_big_cells(biggraph)
     small_idx = _build_small_graph_index(smallgraph)
     portal_router: Optional[_PortalReconstructor]
@@ -1059,6 +1089,7 @@ def main() -> int:
     _draw(
         result=result,
         layers=layers,
+        pr_layers=pr_layers,
         big_cells=big_cells,
         S=S,
         small_idx=small_idx,
