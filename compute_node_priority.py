@@ -2,22 +2,23 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 from typing import Any, Dict, Iterable, List, Tuple
 
 
 # =========================
 # Tunable constants
 # =========================
-TOP_K_NEIGHBORS = 5
+TOP_K_NEIGHBORS = 1000
 
 W_WATER = 0.30
 W_BORDER = 0.20
 W_PLANT = 0.10
 W_COVERAGE_PENALTY = 0.30
 
-W_SELF = 0.70
-W_NEIGH_HOP1 = 0.20
-W_NEIGH_HOP2 = 0.10
+# Layer weights now come from a decay function and are normalized to 1.
+# raw(h) = exp(-HOP_DECAY_ALPHA * h), h in {0(self), 1, 2}
+HOP_DECAY_ALPHA = 1.0
 
 DEFAULT_UNKNOWN_ANIMAL_WEIGHT = 0.0
 ANIMAL_WEIGHTS: Dict[str, float] = {
@@ -48,6 +49,16 @@ def avg(values: Iterable[float]) -> float:
     return sum(data) / len(data)
 
 
+def _normalized_layer_weights(use_hop1: bool, use_hop2: bool) -> Tuple[float, float, float]:
+    raw_self = math.exp(-HOP_DECAY_ALPHA * 0.0)
+    raw_hop1 = math.exp(-HOP_DECAY_ALPHA * 1.0) if use_hop1 else 0.0
+    raw_hop2 = math.exp(-HOP_DECAY_ALPHA * 2.0) if use_hop2 else 0.0
+    raw_sum = raw_self + raw_hop1 + raw_hop2
+    if raw_sum <= 0.0:
+        return 1.0, 0.0, 0.0
+    return raw_self / raw_sum, raw_hop1 / raw_sum, raw_hop2 / raw_sum
+
+
 def top_k_by_time(candidates: List[str], time_by_node: Dict[str, float], k: int) -> List[str]:
     return sorted(candidates, key=lambda cid: (time_by_node.get(cid, float("inf")), cid))[:k]
 
@@ -58,7 +69,7 @@ def compute_local_score(node_feat: Dict[str, Any]) -> Tuple[float, Dict[str, flo
 
     an_i = 0.0
     for animal in animals_present:
-        an_i = max(an_i, float(ANIMAL_WEIGHTS.get(animal, DEFAULT_UNKNOWN_ANIMAL_WEIGHT)))
+        an_i += float(ANIMAL_WEIGHTS.get(animal, DEFAULT_UNKNOWN_ANIMAL_WEIGHT))
 
     wa_i = 1.0 if int(poi_counts.get("waterhole", 0)) > 0 or int(poi_counts.get("waterhole_dry", 0)) > 0 else 0.0
     br_i = 1.0 if bool(node_feat.get("is_boarder", False)) else 0.0
@@ -124,7 +135,8 @@ def compute_priorities(graph: Dict[str, Any], top_k_neighbors: int = TOP_K_NEIGH
 
         n1_avg = avg(local_score[n] for n in n1_top)
         n2_avg = avg(local_score[n] for n in n2_top)
-        p_i = W_SELF * local_score[node_id] + W_NEIGH_HOP1 * n1_avg + W_NEIGH_HOP2 * n2_avg
+        w_self, w_n1, w_n2 = _normalized_layer_weights(bool(n1_top), bool(n2_top))
+        p_i = w_self * local_score[node_id] + w_n1 * n1_avg + w_n2 * n2_avg
 
         priority_out[node_id] = {
             "local_score_S_i": local_score[node_id],
@@ -136,14 +148,19 @@ def compute_priorities(graph: Dict[str, Any], top_k_neighbors: int = TOP_K_NEIGH
             "n2_used_nodes": n2_top,
             "n1_avg_S": n1_avg,
             "n2_avg_S": n2_avg,
+            "w_self": w_self,
+            "w_n1": w_n1,
+            "w_n2": w_n2,
         }
 
     return {
         "meta": {
             "method": "local_score_plus_neighbors",
-            "formula_local": "S_i=(AN_i+0.30*WA_i+0.20*BR_i+0.10*PL_i)*(1-0.30*COV_i)",
-            "formula_priority": f"P_i=0.70*S_i+0.20*avg(N1_top{top_k_neighbors})+0.10*avg(N2_top{top_k_neighbors})",
+            "formula_local": "S_i=(sum_{t in animals_present(i)}w(t)+0.30*WA_i+0.20*BR_i+0.10*PL_i)*(1-0.30*COV_i)",
+            "formula_priority": "P_i=w0*S_i+w1*avg(N1_topK)+w2*avg(N2_topK), "
+            "raw(h)=exp(-alpha*h), h in {0,1,2}, then normalize to sum=1 over available layers",
             "top_k_neighbors": int(top_k_neighbors),
+            "hop_decay_alpha": HOP_DECAY_ALPHA,
             "animal_weights": ANIMAL_WEIGHTS,
             "unknown_animal_weight": DEFAULT_UNKNOWN_ANIMAL_WEIGHT,
         },
