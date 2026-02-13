@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import heapq
 import json
 import math
 from typing import Any, Dict, Iterable, List, Tuple
@@ -90,33 +91,48 @@ def compute_local_score(node_feat: Dict[str, Any]) -> Tuple[float, Dict[str, flo
 
 def build_hop_sets_and_times(
     node_id: str,
-    edges: Dict[str, Dict[str, Dict[str, Any]]],
+    weighted_adj: Dict[str, List[Tuple[str, float]]],
+    top_k_neighbors: int,
 ) -> Tuple[List[str], Dict[str, float], List[str], Dict[str, float]]:
     n1_time: Dict[str, float] = {}
-    for n1, ef_1 in edges.get(node_id, {}).items():
-        n1_time[n1] = edge_travel_time_hours(ef_1)
-
+    for n1, t_1 in weighted_adj.get(node_id, []):
+        n1_time[n1] = t_1
     n1_nodes = sorted(n1_time.keys())
 
-    n2_time: Dict[str, float] = {}
     n1_set = set(n1_nodes)
-    for n1 in n1_nodes:
-        t_1 = n1_time[n1]
-        for n2, ef_2 in edges.get(n1, {}).items():
-            if n2 == node_id or n2 in n1_set:
-                continue
-            t_2 = t_1 + edge_travel_time_hours(ef_2)
-            old = n2_time.get(n2)
-            if old is None or t_2 < old:
-                n2_time[n2] = t_2
+    forward_time: Dict[str, float] = {}
+    best_time: Dict[str, float] = {node_id: 0.0}
+    pq: List[Tuple[float, str]] = [(0.0, node_id)]
 
-    n2_nodes = sorted(n2_time.keys())
-    return n1_nodes, n1_time, n2_nodes, n2_time
+    # Берем до top_k_neighbors ближайших узлов, исключая self и прямых соседей n1.
+    while pq and len(forward_time) < top_k_neighbors:
+        t_cur, cur = heapq.heappop(pq)
+        if t_cur > best_time.get(cur, float("inf")):
+            continue
+
+        if cur != node_id and cur not in n1_set and cur not in forward_time:
+            forward_time[cur] = t_cur
+            if len(forward_time) >= top_k_neighbors:
+                break
+
+        for nxt, edge_t in weighted_adj.get(cur, []):
+            cand = t_cur + edge_t
+            old = best_time.get(nxt)
+            if old is None or cand < old:
+                best_time[nxt] = cand
+                heapq.heappush(pq, (cand, nxt))
+
+    forward_nodes = sorted(forward_time.keys(), key=lambda cid: (forward_time[cid], cid))
+    return n1_nodes, n1_time, forward_nodes, forward_time
 
 
 def compute_priorities(graph: Dict[str, Any], top_k_neighbors: int = TOP_K_NEIGHBORS) -> Dict[str, Any]:
     nodes: Dict[str, Dict[str, Any]] = graph["node_features"]
     edges: Dict[str, Dict[str, Dict[str, Any]]] = graph["edge_features"]
+    weighted_adj = {
+        node_id: [(nxt, edge_travel_time_hours(edge_feat)) for nxt, edge_feat in neis.items()]
+        for node_id, neis in edges.items()
+    }
 
     local_score: Dict[str, float] = {}
     local_parts: Dict[str, Dict[str, float]] = {}
@@ -128,7 +144,11 @@ def compute_priorities(graph: Dict[str, Any], top_k_neighbors: int = TOP_K_NEIGH
 
     priority_out: Dict[str, Dict[str, Any]] = {}
     for node_id in nodes.keys():
-        n1_nodes, n1_time, n2_nodes, n2_time = build_hop_sets_and_times(node_id, edges)
+        n1_nodes, n1_time, n2_nodes, n2_time = build_hop_sets_and_times(
+            node_id=node_id,
+            weighted_adj=weighted_adj,
+            top_k_neighbors=top_k_neighbors,
+        )
 
         n1_top = top_k_by_time(n1_nodes, n1_time, top_k_neighbors)
         n2_top = top_k_by_time(n2_nodes, n2_time, top_k_neighbors)
@@ -157,8 +177,9 @@ def compute_priorities(graph: Dict[str, Any], top_k_neighbors: int = TOP_K_NEIGH
         "meta": {
             "method": "local_score_plus_neighbors",
             "formula_local": "S_i=(sum_{t in animals_present(i)}w(t)+0.30*WA_i+0.20*BR_i+0.10*PL_i)*(1-0.30*COV_i)",
-            "formula_priority": "P_i=w0*S_i+w1*avg(N1_topK)+w2*avg(N2_topK), "
+            "formula_priority": "P_i=w0*S_i+w1*avg(N1)+w2*avg(FWD_topK), "
             "raw(h)=exp(-alpha*h), h in {0,1,2}, then normalize to sum=1 over available layers",
+            "neighbor_scope": "N1 = direct neighbors; FWD_topK = up to top_k closest nodes by shortest-path time excluding self and N1",
             "top_k_neighbors": int(top_k_neighbors),
             "hop_decay_alpha": HOP_DECAY_ALPHA,
             "animal_weights": ANIMAL_WEIGHTS,
@@ -180,7 +201,7 @@ def main() -> None:
         "--top-k-neighbors",
         type=int,
         default=TOP_K_NEIGHBORS,
-        help="How many nearest neighbors to use per hop layer (N1 and N2)",
+        help="How many nearest forward nodes (excluding self and direct neighbors) to use",
     )
     args = parser.parse_args()
 
