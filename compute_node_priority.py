@@ -189,19 +189,29 @@ def compute_priorities(graph: Dict[str, Any], top_k_neighbors: int = TOP_K_NEIGH
     }
 
 
+def build_compact_priority_map(full_result: Dict[str, Any]) -> Dict[str, float]:
+    node_priority = full_result.get("node_priority", {})
+    return {node_id: float(parts["priority_P_i"]) for node_id, parts in node_priority.items()}
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Compute node priorities for each graph cell")
     parser.add_argument("--graph", default="etosha_grid_graph.json", help="Path to graph JSON")
     parser.add_argument(
         "--out",
-        default="etosha_node_priority.json",
-        help="Output JSON path with local and final priority scores",
+        default="etosha_node_priority_compact.json",
+        help="Output JSON path with compact priorities (node_id -> priority)",
     )
     parser.add_argument(
         "--top-k-neighbors",
         type=int,
         default=TOP_K_NEIGHBORS,
         help="How many nearest forward nodes (excluding self and direct neighbors) to use",
+    )
+    parser.add_argument(
+        "--full",
+        action="store_true",
+        help="Save full verbose payload instead of compact map",
     )
     args = parser.parse_args()
 
@@ -211,11 +221,19 @@ def main() -> None:
     with open(args.graph, "r", encoding="utf-8") as f:
         graph = json.load(f)
 
-    result = compute_priorities(graph, top_k_neighbors=args.top_k_neighbors)
-    with open(args.out, "w", encoding="utf-8") as f:
-        json.dump(result, f, ensure_ascii=False)
+    result_full = compute_priorities(graph, top_k_neighbors=args.top_k_neighbors)
+    if args.full:
+        payload: Any = result_full
+        count = len(result_full["node_priority"])
+    else:
+        payload = build_compact_priority_map(result_full)
+        count = len(payload)
 
-    print(f"Saved priorities for {len(result['node_priority'])} nodes -> {args.out}")
+    with open(args.out, "w", encoding="utf-8") as f:
+        json.dump(payload, f, ensure_ascii=False)
+
+    mode = "full" if args.full else "compact"
+    print(f"Saved {mode} priorities for {count} nodes -> {args.out}")
 
 
 if __name__ == "__main__":
