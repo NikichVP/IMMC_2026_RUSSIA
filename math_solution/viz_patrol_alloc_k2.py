@@ -983,8 +983,34 @@ def _draw(
 
     for rank, p_idx in enumerate(use_routes):
         patrol = patrols[p_idx]
+        col = route_colors[rank % len(route_colors)]
+        t_h = _safe_float(patrol.get("time_h"))
+        base_big = str(patrol.get("base", ""))
         way = patrol.get("way", [])
         if not isinstance(way, list) or len(way) < 2:
+            base_center = big_cells.get(base_big, {}).get("center")
+            if isinstance(base_center, tuple) and len(base_center) == 2:
+                ax.plot(
+                    [base_center[0]],
+                    [base_center[1]],
+                    marker="o",
+                    markersize=5.2,
+                    markerfacecolor=col,
+                    markeredgecolor="white",
+                    markeredgewidth=0.8,
+                    linestyle="None",
+                    zorder=12,
+                )
+                ax.annotate(
+                    f"S{p_idx+1}",
+                    (base_center[0], base_center[1]),
+                    xytext=(3, 3),
+                    textcoords="offset points",
+                    fontsize=6,
+                    color=col,
+                    zorder=12,
+                )
+            legend_handles.append(Line2D([0], [0], color=col, marker="o", lw=0, label=f"Route #{p_idx+1}: idle at base, {t_h:.2f} h"))
             continue
         xy, route_len_m = _build_detailed_route_xy(
             way=way,
@@ -993,8 +1019,30 @@ def _draw(
             portal_router=portal_router,
         )
         if len(xy) < 2:
+            base_center = big_cells.get(base_big, {}).get("center")
+            if isinstance(base_center, tuple) and len(base_center) == 2:
+                ax.plot(
+                    [base_center[0]],
+                    [base_center[1]],
+                    marker="o",
+                    markersize=5.2,
+                    markerfacecolor=col,
+                    markeredgecolor="white",
+                    markeredgewidth=0.8,
+                    linestyle="None",
+                    zorder=12,
+                )
+                ax.annotate(
+                    f"S{p_idx+1}",
+                    (base_center[0], base_center[1]),
+                    xytext=(3, 3),
+                    textcoords="offset points",
+                    fontsize=6,
+                    color=col,
+                    zorder=12,
+                )
+            legend_handles.append(Line2D([0], [0], color=col, marker="o", lw=0, label=f"Route #{p_idx+1}: idle at base, {t_h:.2f} h"))
             continue
-        col = route_colors[rank % len(route_colors)]
         xs = [q[0] for q in xy]
         ys = [q[1] for q in xy]
 
@@ -1021,7 +1069,6 @@ def _draw(
         )
         _draw_direction_arrows(ax, xy, arrow_step_km=10.0, zorder=10)
 
-        t_h = _safe_float(patrol.get("time_h"))
         label = f"Route #{p_idx+1}: {route_len_m/1000.0:.1f} km, {t_h:.2f} h"
         legend_handles.append(Line2D([0], [0], color=col, lw=3, label=label))
 

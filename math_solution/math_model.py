@@ -31,11 +31,11 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_DIR = os.path.dirname(SCRIPT_DIR)
 
 # Defaults and model constants
-DEFAULT_PATROL_COST = 50000.0
+DEFAULT_PATROL_COST = 65000.0
 DEFAULT_MIN_RANGERS_REQUIRED = 2
-DEFAULT_GPS_FULL_COST = 60000.0
+DEFAULT_GPS_FULL_COST = 90000.0
 DEFAULT_SOUND_TRACKER_COST_PER_KM = 750.0
-DEFAULT_TOTAL_BORDER_KM = 820.0
+DEFAULT_TOTAL_BORDER_KM = 500.0
 
 DEFAULT_DIST_PATH = "solution/big_dist_with_portals_time_priority.json"
 DEFAULT_PATROL_PATH = "solution/patrol_house_to_big_cell.json"

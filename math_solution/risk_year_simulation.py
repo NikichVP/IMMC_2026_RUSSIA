@@ -43,6 +43,7 @@ RANGER_STOP_RADIUS_M = 1000.0
 
 # Daily patrol randomization assumptions
 PATROL_ACTIVE_HOURS_PER_DAY = 12
+PATROL_LOOPS_PER_DAY = 2
 DAILY_KEYPOINT_LIMIT = 8
 
 # Target weights from user request
@@ -503,14 +504,15 @@ def _build_hourly_patrol_positions(
 
             for hh in range(24):
                 global_h = day_start + hh
-                if hh >= PATROL_ACTIVE_HOURS_PER_DAY or total_h <= 1e-9:
+                if total_h <= 1e-9:
                     one_big[global_h] = base_big
                     one_node[global_h] = ctx.rep_node_by_big[base_big]
                     continue
 
-                t_h = float(hh)
-                if total_h > 0.0:
-                    t_h = t_h % total_h
+                # Business rule: patrol completes one route in each 12-hour shift
+                # (two full route loops per day).
+                shift_h = float(hh % PATROL_ACTIVE_HOURS_PER_DAY)
+                t_h = (shift_h / float(PATROL_ACTIVE_HOURS_PER_DAY)) * total_h
 
                 acc = 0.0
                 chosen_big = base_big
@@ -942,6 +944,9 @@ def simulate_period(
             "ranger_speed_kmh": RANGER_SPEED_KMH,
             "intruder_speed_kmh": INTRUDER_SPEED_KMH,
             "sla_h": T_SLA_H,
+            "patrol_shift_hours": PATROL_ACTIVE_HOURS_PER_DAY,
+            "patrol_loops_per_day": PATROL_LOOPS_PER_DAY,
+            "patrol_loop_policy": "one full route per 12-hour shift (2 loops per day)",
         },
     }
 
