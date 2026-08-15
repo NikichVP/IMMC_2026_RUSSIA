@@ -6,7 +6,7 @@ Code, selected visualizations, and the final report from our 2026 International 
 
 Our team received an **IM²C Meritorious Award** at the international level. In 2026, 68 finalist teams from 37 countries and regions reached the international round; 11 teams received Meritorious recognition. [Official results](https://immchallenge.org/2026-results/).
 
-![Aggregated priority map](figures/priority_blocks.png)
+![Example optimized allocation](figures/best_plan.png)
 
 ## Model
 
@@ -43,10 +43,6 @@ We treated wildlife protection as a constrained resource-allocation problem. The
 ### Patrol routing
 
 ![Patrol routes](figures/patrol_routes.png)
-
-### Example optimized allocation
-
-![Best-plan visualization](figures/best_plan.png)
 
 ## Reproduction note
 
