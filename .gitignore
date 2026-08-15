@@ -1,15 +1,26 @@
 __pycache__/
 *.py[cod]
+.venv/
+venv/
 .DS_Store
+.vscode/
+.idea/
 
-# Generated local artifacts
-etosha_node_priority.json
+# Local/raw geospatial inputs
+*.gpkg
+*.tif
+*.tiff
+raw_data/
 
-# Smoke/debug outputs
+# Large generated graph/data products
+etosha_grid_graph.json
+solution/*.json
+math_solution/*.json
+single_patrol_demo_output.json
+
+# Generated reports and local experiment outputs
+math_solution/math_model_report*.md
+math_solution/*_result*.json
 math_solution/*_smoke*.json
-math_solution/math_model_result*.json
-math_solution/patrol_alloc_greedy_unique_result*.json
-
-# Generated figures/results (local)
 solution/patrol_alloc_*.png
-solution/patrol_alloc_greedy_unique_result*.json
+solution/patrol_alloc_*_result*.json
