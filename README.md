@@ -1,6 +1,6 @@
 # Etosha Wildlife Protection — IM²C 2026
 
-Code, selected visualizations, and the final report from our 2026 International Mathematical Modeling Challenge solution to **Protecting Wildlife at Scale**, using Etosha National Park in Namibia as the case study.
+Research code, selected visualizations, and the final submission from our 2026 International Mathematical Modeling Challenge solution to **Protecting Wildlife at Scale**, using Etosha National Park in Namibia as the case study.
 
 **[Read the final report](./IMMC_2026_Report.pdf)**
 
@@ -19,7 +19,7 @@ We treated wildlife protection as a constrained resource-allocation problem. The
 5. **Risk simulation** — simulate seasonal threat events and interception under the assumptions defined in the model.
 6. **Plan search** — screen feasible allocations on a shorter horizon, then evaluate the strongest candidates over a full simulated year.
 
-## Code map
+## Repository map
 
 | File | Role |
 |---|---|
@@ -34,6 +34,18 @@ We treated wildlife protection as a constrained resource-allocation problem. The
 | `math_solution/viz_patrol_alloc_k2.py` | Route/allocation visualization |
 | `single_patrol_demo.py` | Single-patrol routing demonstration |
 
+## Environment
+
+The geospatial preprocessing and visualization code uses Python with the dependencies in `requirements.txt`.
+
+```bash
+python -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+```
+
+A complete end-to-end rerun also requires the source geospatial layers and large derived graph/matrix files described in [`data/README.md`](./data/README.md). Those data products are intentionally not redistributed in the current tree.
+
 ## Selected outputs
 
 ### Spatial priority
@@ -44,11 +56,13 @@ We treated wildlife protection as a constrained resource-allocation problem. The
 
 ![Patrol routes](figures/patrol_routes.png)
 
-## Reproduction note
+## Reproducibility and scope
 
-This repository is a curated version of the original working code. Large generated graph matrices, raw geospatial source files, and intermediate artifacts are intentionally excluded from the current tree. The expected data products and filenames are documented in [`data/README.md`](./data/README.md).
+This is a curated release of the original competition repository. It preserves the modeling, optimization, simulation, preprocessing, and visualization code together with representative outputs and the final paper, while excluding large generated data products and raw geospatial inputs.
 
-The simulation parameters in `math_solution/risk_year_simulation.py` are competition-model assumptions, not field-calibrated conservation forecasts. The final report documents the model, assumptions, limitations, and decision framework used in the submission.
+The simulation parameters in `math_solution/risk_year_simulation.py` are **competition-model assumptions**, not field-calibrated conservation forecasts. The repository should therefore be read as a mathematical modeling and optimization project rather than an operational wildlife-management system. The final report documents the assumptions, limitations, and decision framework used in the submission.
+
+GitHub Actions performs a repository-wide Python syntax check on pushes and pull requests. This verifies source-code integrity, not end-to-end numerical reproducibility without the excluded data dependencies.
 
 ## My contribution
 
