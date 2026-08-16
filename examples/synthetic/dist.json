@@ -1,0 +1,14 @@
+{
+  "meta": {
+    "description": "Minimal single-block distance fixture for runtime verification"
+  },
+  "dist": {
+    "br0_bc0": {
+      "br0_bc0": {
+        "distance_m": 0.0,
+        "time_h": 0.0,
+        "small_priority_sum": 0.0
+      }
+    }
+  }
+}

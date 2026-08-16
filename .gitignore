@@ -15,6 +15,13 @@ raw_data/
 # Large generated graph/data products
 etosha_grid_graph.json
 solution/*.json
+!solution/big_dist_with_portals.json
+!solution/big_dist_with_portals_time_priority.json
+!solution/etosha_big_square_graph_14x14.json
+!solution/etosha_node_priority_compact_clamped.json
+!solution/patrol_alloc_greedy_unique_result.json
+!solution/patrol_alloc_greedy_unique_result_k3.json
+!solution/patrol_house_to_big_cell.json
 math_solution/*.json
 single_patrol_demo_output.json
 
@@ -24,3 +31,5 @@ math_solution/*_result*.json
 math_solution/*_smoke*.json
 solution/patrol_alloc_*.png
 solution/patrol_alloc_*_result*.json
+!solution/patrol_alloc_greedy_unique_result.json
+!solution/patrol_alloc_greedy_unique_result_k3.json

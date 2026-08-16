@@ -32,6 +32,7 @@ We treated wildlife protection as a constrained resource-allocation problem. The
 | `math_solution/risk_year_simulation.py` | Seasonal annual-risk simulation |
 | `math_solution/math_model.py` | Budget logic and top-level plan search |
 | `math_solution/viz_patrol_alloc_k2.py` | Route/allocation visualization |
+| `simulation.py` | Fine-grid patrol-sector and softmax route simulation |
 | `single_patrol_demo.py` | Single-patrol routing demonstration |
 
 ## Environment
@@ -44,7 +45,38 @@ source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-A complete end-to-end rerun also requires the source geospatial layers and large derived graph/matrix files described in [`data/README.md`](./data/README.md). Those data products are intentionally not redistributed in the current tree.
+The repository includes the generated block graph, travel matrices, priorities, patrol-house mapping, and original result artifacts used by the retained optimizer. Rebuilding those artifacts from scratch still requires the source geospatial layers and the fine-grid graph described in [`data/README.md`](./data/README.md).
+
+## Verified runs
+
+Run the automated runtime suite:
+
+```bash
+python -m unittest discover -s tests -v
+```
+
+Run the patrol allocator against the restored Etosha artifacts:
+
+```bash
+python math_solution/patrol_alloc_greedy_unique.py \
+  --Kmin 2 --Kmax 2 --topL 20 --Tlim 12 \
+  --out /tmp/patrol-smoke.json
+```
+
+Run the top-level annual-risk model on the small, self-contained fixture:
+
+```bash
+python math_solution/math_model.py \
+  --total-budget 0 \
+  --dist examples/synthetic/dist.json \
+  --sound-graph examples/synthetic/small_graph.json \
+  --sound-priority examples/synthetic/priority.json \
+  --out /tmp/math-model-smoke.json \
+  --report-out /tmp/math-model-smoke.md \
+  --skip-plot --no-progress
+```
+
+The fixture exercises the orchestration and full 365-day risk-simulation path. The first command above exercises patrol allocation on the restored competition-scale block data.
 
 ## Selected outputs
 
@@ -58,11 +90,11 @@ A complete end-to-end rerun also requires the source geospatial layers and large
 
 ## Reproducibility and scope
 
-This is a curated release of the original competition repository. It preserves the modeling, optimization, simulation, preprocessing, and visualization code together with representative outputs and the final paper, while excluding large generated data products and raw geospatial inputs.
+This release preserves the original modeling, optimization, simulation, preprocessing, and visualization code together with the generated block-level planning artifacts, representative outputs, and final paper. Raw GIS inputs and the generated 33,264-node fine-grid graph are not included because they were never tracked in the repository.
 
 The simulation parameters in `math_solution/risk_year_simulation.py` are **competition-model assumptions**, not field-calibrated conservation forecasts. The repository should therefore be read as a mathematical modeling and optimization project rather than an operational wildlife-management system. The final report documents the assumptions, limitations, and decision framework used in the submission.
 
-GitHub Actions performs a repository-wide Python syntax check on pushes and pull requests. This verifies source-code integrity, not end-to-end numerical reproducibility without the excluded data dependencies.
+GitHub Actions performs a repository-wide syntax check plus unit and integration tests. The suite covers fine-grid patrol simulation, border monitoring selection, a full synthetic annual-risk run, and an optimizer run against the restored Etosha block-level data. Rebuilding the geospatial inputs themselves remains outside the repository because the raw layers are not included.
 
 ## My contribution
 

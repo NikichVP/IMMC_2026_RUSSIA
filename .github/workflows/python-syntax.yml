@@ -1,4 +1,4 @@
-name: Python syntax check
+name: Python runtime checks
 
 on:
   push:
@@ -7,7 +7,7 @@ on:
     branches: [main]
 
 jobs:
-  compile:
+  test:
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository
@@ -20,3 +20,6 @@ jobs:
 
       - name: Compile Python sources
         run: python -m compileall -q .
+
+      - name: Run unit and integration tests
+        run: python -m unittest discover -s tests -v

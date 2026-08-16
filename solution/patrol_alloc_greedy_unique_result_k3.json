@@ -1,0 +1,180 @@
+{
+  "meta": {
+    "K_exact": 3,
+    "Tlim": 12.0,
+    "topL": 180,
+    "seed": 1,
+    "score_gain_pow": 1.35,
+    "score_time_pow": 0.75,
+    "dist_path": "solution/big_dist_with_portals_time_priority.json",
+    "patrol_path": "solution/patrol_house_to_big_cell.json",
+    "biggraph_path": "solution/etosha_big_square_graph_14x14.json",
+    "priority_path": "solution/etosha_node_priority_compact_clamped.json"
+  },
+  "best": {
+    "K": 3,
+    "m": [
+      0,
+      0,
+      0,
+      1,
+      0,
+      2,
+      0,
+      0
+    ],
+    "total_priority": 930.9104878662048,
+    "total_time_h": 34.5,
+    "houses_big_ids": [
+      "br1_bc12",
+      "br1_bc1",
+      "br1_bc1",
+      "br2_bc11",
+      "br3_bc16",
+      "br5_bc19",
+      "br5_bc20",
+      "br5_bc9"
+    ],
+    "patrols": [
+      {
+        "base": "br2_bc11",
+        "time_h": 11.725,
+        "way": [
+          "br2_bc11",
+          "br4_bc7",
+          "br5_bc7",
+          "br5_bc6",
+          "br5_bc5",
+          "br3_bc5",
+          "br5_bc8",
+          "br2_bc13",
+          "br2_bc12",
+          "br2_bc11"
+        ],
+        "assigned": [
+          "br2_bc12",
+          "br2_bc13",
+          "br5_bc8",
+          "br5_bc7",
+          "br5_bc6",
+          "br4_bc7",
+          "br3_bc5",
+          "br5_bc5"
+        ]
+      },
+      {
+        "base": "br5_bc19",
+        "time_h": 11.274999999999999,
+        "way": [
+          "br5_bc19",
+          "br4_bc20",
+          "br4_bc18",
+          "br4_bc17",
+          "br3_bc17",
+          "br3_bc14",
+          "br4_bc14",
+          "br4_bc16",
+          "br5_bc17",
+          "br6_bc18",
+          "br7_bc19",
+          "br7_bc20",
+          "br6_bc19",
+          "br5_bc19"
+        ],
+        "assigned": [
+          "br6_bc19",
+          "br7_bc19",
+          "br4_bc17",
+          "br4_bc18",
+          "br3_bc14",
+          "br7_bc20",
+          "br6_bc18",
+          "br3_bc17",
+          "br4_bc16",
+          "br4_bc20",
+          "br5_bc17",
+          "br4_bc14"
+        ]
+      },
+      {
+        "base": "br5_bc19",
+        "time_h": 11.499999999999998,
+        "way": [
+          "br5_bc19",
+          "br6_bc20",
+          "br7_bc21",
+          "br7_bc18",
+          "br5_bc18",
+          "br5_bc16",
+          "br2_bc17",
+          "br1_bc17",
+          "br0_bc18",
+          "br3_bc18",
+          "br4_bc19",
+          "br5_bc19"
+        ],
+        "assigned": [
+          "br4_bc19",
+          "br5_bc18",
+          "br7_bc18",
+          "br6_bc20",
+          "br3_bc18",
+          "br7_bc21",
+          "br2_bc17",
+          "br5_bc16",
+          "br1_bc17",
+          "br0_bc18"
+        ]
+      }
+    ],
+    "assigned_cells": [
+      "br6_bc19",
+      "br2_bc12",
+      "br7_bc19",
+      "br4_bc17",
+      "br4_bc18",
+      "br2_bc13",
+      "br4_bc19",
+      "br3_bc14",
+      "br5_bc8",
+      "br5_bc7",
+      "br5_bc6",
+      "br7_bc20",
+      "br4_bc7",
+      "br6_bc18",
+      "br3_bc17",
+      "br3_bc5",
+      "br4_bc16",
+      "br5_bc18",
+      "br7_bc18",
+      "br5_bc5",
+      "br4_bc20",
+      "br6_bc20",
+      "br5_bc17",
+      "br3_bc18",
+      "br4_bc14",
+      "br7_bc21",
+      "br2_bc17",
+      "br5_bc16",
+      "br1_bc17",
+      "br0_bc18"
+    ]
+  },
+  "per_K_best": [
+    {
+      "K": 3,
+      "m": [
+        0,
+        0,
+        0,
+        1,
+        0,
+        2,
+        0,
+        0
+      ],
+      "total_priority": 930.9104878662048,
+      "total_time_h": 34.5
+    }
+  ]
+}

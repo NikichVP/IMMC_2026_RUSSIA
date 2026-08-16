@@ -7,10 +7,6 @@ import math
 import random
 from typing import Any, Dict, List, Tuple
 
-import matplotlib.pyplot as plt
-import numpy as np
-from matplotlib.colors import ListedColormap
-
 from simulation import edge_travel_time_hours, precompute_sector_assignment
 
 
@@ -306,6 +302,8 @@ def run_single_sortie_demo(
 
 
 def _build_inside_mask(meta: Dict[str, Any], nodes: Dict[str, Dict[str, Any]]) -> np.ndarray:
+    import numpy as np
+
     n_rows, n_cols = meta["grid_shape_rows_cols"]
     inside_mask = np.zeros((n_rows, n_cols), dtype=bool)
     for nf in nodes.values():
@@ -331,6 +329,10 @@ def plot_single_sortie(
     sortie: Dict[str, Any],
     out_path: str,
 ) -> None:
+    import matplotlib.pyplot as plt
+    import numpy as np
+    from matplotlib.colors import ListedColormap
+
     meta = graph["meta"]
     nodes = graph["node_features"]
     inside_mask = _build_inside_mask(meta, nodes)
