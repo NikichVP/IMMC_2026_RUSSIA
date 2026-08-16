@@ -6,6 +6,8 @@ Research code, selected visualizations, and the final submission from our 2026 I
 
 Our team received an **IM²C Meritorious Award** at the international level. In 2026, 68 finalist teams from 37 countries and regions reached the international round; 11 teams received Meritorious recognition. [Official results](https://immchallenge.org/2026-results/).
 
+![Example optimized allocation](figures/best_plan.png)
+
 ## Model
 
 We treated wildlife protection as a constrained resource-allocation problem. The computational pipeline combines a spatial graph of the park with threat priorities, patrol routing, monitoring coverage, seasonal risk simulation, and budget search.
@@ -52,7 +54,7 @@ A complete end-to-end rerun also requires the source geospatial layers and large
 
 ### Patrol routing
 
-![Representative patrol plan for three teams](figures/best_plan.png)
+![Representative patrol plan for three teams](figures/patrol_routes.png)
 
 ## Reproducibility and scope
 
